@@ -49,6 +49,20 @@ export default function ResultCard({
     frame();
   }, []);
 
+  const handleDownload = (e: React.MouseEvent) => {
+    if (!downloadUrl) return;
+    try {
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Download click fallback error:', err);
+    }
+  };
+
   return (
     <div className="w-full max-w-xl mx-auto rounded-2xl border border-slate-800 bg-slate-900/40 p-8 text-center animate-in fade-in zoom-in-95 duration-200">
       <div className="flex flex-col items-center justify-center">
@@ -66,6 +80,7 @@ export default function ResultCard({
           <a
             href={downloadUrl}
             download={fileName}
+            onClick={handleDownload}
             className="flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3.5 text-sm font-semibold text-white hover:bg-violet-500 transition-all shadow-lg shadow-violet-600/30 hover:scale-[1.02] duration-200"
           >
             <Download className="h-4.5 w-4.5" />

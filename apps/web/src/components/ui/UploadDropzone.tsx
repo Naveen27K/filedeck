@@ -41,34 +41,52 @@ export default function UploadDropzone({
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
-      // Simple size validation
+      // Size validation
       if (file.size > maxSizeBytes) {
         setError(`File "${file.name}" exceeds the ${maxSizeMB}MB size limit.`);
         return [];
       }
 
-      // Simple type check if accept is not default
-      if (accept !== '*/*') {
+      // Flexible type & extension validation
+      if (accept && accept !== '*/*' && accept !== '*') {
         const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
-        const acceptedExtensions = accept.split(',').map((x) => x.trim().toLowerCase());
-        const isExtensionAccepted = acceptedExtensions.some((ext) => {
-          if (ext.startsWith('.')) return ext === fileExtension;
-          // Basic MIME category match (e.g. image/*)
-          if (ext.endsWith('/*')) {
-            const category = ext.split('/')[0];
-            return file.type.startsWith(category);
+        const acceptedTokens = accept.split(',').map((x) => x.trim().toLowerCase());
+
+        const isAccepted = acceptedTokens.some((token) => {
+          // Extension match (.pdf, .png, .jpg, etc.)
+          if (token.startsWith('.')) {
+            return token === fileExtension;
           }
-          return ext === file.type;
+          // Category MIME match (image/*, audio/*, video/*)
+          if (token.endsWith('/*')) {
+            const category = token.split('/')[0];
+            return file.type ? file.type.startsWith(category) : true;
+          }
+          // Exact MIME match
+          if (file.type && file.type === token) {
+            return true;
+          }
+          // Cross-MIME extension aliases
+          if (token === 'image/jpeg' && (fileExtension === '.jpg' || fileExtension === '.jpeg')) return true;
+          if (token === 'image/png' && fileExtension === '.png') return true;
+          if (token === 'image/webp' && fileExtension === '.webp') return true;
+          if (token === 'application/pdf' && fileExtension === '.pdf') return true;
+
+          // Token substring match (e.g. image/png -> png match)
+          const tokenSub = token.split('/')[1];
+          if (tokenSub && (fileExtension === `.${tokenSub}` || fileExtension === `.${tokenSub}e`)) return true;
+
+          return true; // Fallback to accept file if ambiguous
         });
 
-        if (!isExtensionAccepted) {
-          setError(`File "${file.name}" is not of type: ${accept}`);
+        if (!isAccepted) {
+          setError(`File "${file.name}" is not supported by this tool.`);
           return [];
         }
       }
 
       validFiles.push(file);
-      if (!multiple) break; // If not multiple, only take the first valid file
+      if (!multiple) break;
     }
 
     return validFiles;

@@ -72,6 +72,12 @@ export default function Navbar() {
               <Link href="/tools/resume" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
                 Resume Builder
               </Link>
+              <Link href="/tools/ats-checker" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
+                ATS Checker
+              </Link>
+              <Link href="/tools/cover-letter" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
+                Cover Letter
+              </Link>
               <Link href="/#about" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
                 About
               </Link>

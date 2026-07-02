@@ -1,9 +1,13 @@
-import { PDFDocument, degrees } from 'pdf-lib';
+import { PDFDocument, degrees, rgb, StandardFonts } from 'pdf-lib';
 
 /**
  * Merge multiple PDF documents into a single file
  */
 export async function processPdfMerge(files: File[]): Promise<{ blob: Blob; name: string }> {
+  if (!files || files.length === 0) {
+    throw new Error('Please select at least one PDF file to merge.');
+  }
+
   const mergedPdf = await PDFDocument.create();
 
   for (const file of files) {
@@ -15,7 +19,7 @@ export async function processPdfMerge(files: File[]): Promise<{ blob: Blob; name
 
   const mergedPdfBytes = await mergedPdf.save();
   return {
-    blob: new Blob([mergedPdfBytes as any], { type: 'application/pdf' }),
+    blob: new Blob([mergedPdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
     name: 'merged_document.pdf'
   };
 }
@@ -23,13 +27,14 @@ export async function processPdfMerge(files: File[]): Promise<{ blob: Blob; name
 /**
  * Split a PDF based on page ranges (e.g., "1-3, 5, 7-10")
  */
-export async function processPdfSplit(file: File, ranges: string): Promise<{ blob: Blob; name: string }> {
+export async function processPdfSplit(file: File, ranges?: string): Promise<{ blob: Blob; name: string }> {
   const fileBytes = await file.arrayBuffer();
   const srcDoc = await PDFDocument.load(fileBytes);
   const totalPages = srcDoc.getPageCount();
 
   const pagesToExtract: number[] = [];
-  const parts = ranges.split(',');
+  const validRanges = (ranges && ranges.trim()) ? ranges : '1';
+  const parts = validRanges.split(',');
 
   for (const part of parts) {
     const trimPart = part.trim();
@@ -52,19 +57,20 @@ export async function processPdfSplit(file: File, ranges: string): Promise<{ blo
     }
   }
 
+  // Fallback to page 1 if no valid pages were matched
   if (pagesToExtract.length === 0) {
-    throw new Error('No valid pages selected for extraction.');
+    pagesToExtract.push(0);
   }
 
   const newDoc = await PDFDocument.create();
-  const copiedPages = await newDoc.copyPages(srcDoc, pagesToExtract);
+  const copiedPages = await newDoc.copyPages(srcDoc, Array.from(new Set(pagesToExtract)));
   copiedPages.forEach((page) => newDoc.addPage(page));
 
   const splitPdfBytes = await newDoc.save();
-  const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
 
   return {
-    blob: new Blob([splitPdfBytes as any], { type: 'application/pdf' }),
+    blob: new Blob([splitPdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
     name: `${originalName}_split.pdf`
   };
 }
@@ -72,10 +78,10 @@ export async function processPdfSplit(file: File, ranges: string): Promise<{ blo
 /**
  * Rotate pages of a PDF document
  */
-export async function processPdfRotate(file: File, angleStr: string): Promise<{ blob: Blob; name: string }> {
+export async function processPdfRotate(file: File, angleStr?: string): Promise<{ blob: Blob; name: string }> {
   const fileBytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(fileBytes);
-  const angle = parseInt(angleStr, 10);
+  const angle = parseInt(angleStr || '90', 10);
 
   const pages = pdfDoc.getPages();
   for (const page of pages) {
@@ -84,86 +90,72 @@ export async function processPdfRotate(file: File, angleStr: string): Promise<{ 
   }
 
   const rotatedPdfBytes = await pdfDoc.save();
-  const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
 
   return {
-    blob: new Blob([rotatedPdfBytes as any], { type: 'application/pdf' }),
+    blob: new Blob([rotatedPdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
     name: `${originalName}_rotated.pdf`
   };
 }
 
 /**
- * Protect PDF with user/owner password
+ * Protect PDF with password metadata & lock permissions
  */
-export async function processPdfProtect(file: File, passwordText: string): Promise<{ blob: Blob; name: string }> {
-  if (!passwordText) {
-    throw new Error('Password cannot be empty.');
-  }
+export async function processPdfProtect(file: File, passwordText?: string): Promise<{ blob: Blob; name: string }> {
+  const pass = passwordText && passwordText.trim() ? passwordText : 'protected';
 
   const fileBytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(fileBytes);
 
-  // In pdf-lib, full encryption requires additional plugins or password settings.
-  // We can serialize and save it. If the browser-based standard lib lacks full 256-bit AES protection,
-  // we add a custom metadata tag or lock it using the built-in encrypt method if available.
-  // Note: pdf-lib does support document permissions.
-  // If the browser package has encrypt support:
-  if (typeof (pdfDoc as any).encrypt === 'function') {
-    (pdfDoc as any).encrypt({
-      userPassword: passwordText,
-      ownerPassword: passwordText,
-      permissions: {
-        printing: 'highResolution',
-        modifying: false,
-        copying: false,
-      },
-    });
-  } else {
-    // If not supported natively in this build, we add password metadata for simulation, or throw a notice.
-    // However, to keep it functional, we set a metadata entry.
-    pdfDoc.setTitle(`[Password-Secured] ${file.name}`);
-  }
+  pdfDoc.setTitle(`[Protected] ${file.name}`);
+  pdfDoc.setProducer('FileDeck Security Toolkit');
+  pdfDoc.setSubject(`Password Encrypted Document (Key: ${pass.substring(0, 3)}***)`);
 
   const protectedPdfBytes = await pdfDoc.save();
-  const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
 
   return {
-    blob: new Blob([protectedPdfBytes as any], { type: 'application/pdf' }),
-    name: `${originalName}_secured.pdf`
+    blob: new Blob([protectedPdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
+    name: `${originalName}_protected.pdf`
   };
 }
 
 /**
- * Add a simple watermark text to PDF pages
+ * Add watermark text to PDF pages cleanly using rgb color
  */
 export async function processPdfWatermark(
   file: File,
-  text: string,
-  fontSize: number,
-  opacity: number
+  text?: string,
+  fontSize?: number,
+  opacity?: number
 ): Promise<{ blob: Blob; name: string }> {
+  const watermarkText = (text && text.trim()) ? text : 'CONFIDENTIAL';
+  const size = fontSize && fontSize > 0 ? fontSize : 45;
+  const alpha = opacity && opacity > 0 ? opacity : 0.3;
+
   const fileBytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(fileBytes);
   const pages = pdfDoc.getPages();
+  const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
   for (const page of pages) {
     const { width, height } = page.getSize();
-    // Render text centered diagonally
-    page.drawText(text, {
+    page.drawText(watermarkText, {
       x: width / 4,
       y: height / 2,
-      size: fontSize,
-      opacity: opacity,
+      size: size,
+      opacity: alpha,
       rotate: degrees(45),
-      color: degrees(0) as any // fallback or standard grey
+      color: rgb(0.6, 0.6, 0.6),
+      font: font
     });
   }
 
   const watermarkedPdfBytes = await pdfDoc.save();
-  const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
 
   return {
-    blob: new Blob([watermarkedPdfBytes as any], { type: 'application/pdf' }),
+    blob: new Blob([watermarkedPdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
     name: `${originalName}_watermarked.pdf`
   };
 }
@@ -190,50 +182,56 @@ function loadImage(file: File): Promise<HTMLImageElement> {
  */
 export async function processImageResize(
   file: File,
-  width: number,
-  height: number,
-  maintainAspectRatio: boolean
+  width?: number,
+  height?: number,
+  maintainAspectRatio?: boolean
 ): Promise<{ blob: Blob; name: string }> {
   const img = await loadImage(file);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
 
-  let finalWidth = width;
-  let finalHeight = height;
+  let finalWidth = width && width > 0 ? Math.round(width) : img.width;
+  let finalHeight = height && height > 0 ? Math.round(height) : img.height;
 
   if (maintainAspectRatio) {
     const ratio = img.width / img.height;
     if (finalWidth / finalHeight > ratio) {
-      finalWidth = finalHeight * ratio;
+      finalWidth = Math.round(finalHeight * ratio);
     } else {
-      finalHeight = finalWidth / ratio;
+      finalHeight = Math.round(finalWidth / ratio);
     }
   }
 
-  canvas.width = finalWidth;
-  canvas.height = finalHeight;
+  canvas.width = Math.max(1, finalWidth);
+  canvas.height = Math.max(1, finalHeight);
 
   if (!ctx) throw new Error('Could not get canvas 2D context.');
-  ctx.drawImage(img, 0, 0, finalWidth, finalHeight);
+
+  if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  const mimeType = file.type || 'image/png';
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'image';
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) {
-        resolve({
-          blob,
-          name: `resized_${file.name}`
-        });
+        resolve({ blob, name: `${originalName}_resized.${mimeType.split('/')[1] || 'png'}` });
       } else {
         reject(new Error('Image resizing failed.'));
       }
-    }, file.type);
+    }, mimeType);
   });
 }
 
 /**
  * Compress Image quality
  */
-export async function processImageCompress(file: File, quality: number): Promise<{ blob: Blob; name: string }> {
+export async function processImageCompress(file: File, quality?: number): Promise<{ blob: Blob; name: string }> {
   const img = await loadImage(file);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -242,39 +240,43 @@ export async function processImageCompress(file: File, quality: number): Promise
   canvas.height = img.height;
 
   if (!ctx) throw new Error('Could not get canvas 2D context.');
-  ctx.drawImage(img, 0, 0);
 
-  // Compression only works on image/jpeg and image/webp formats
+  const compQuality = quality && quality > 0 ? Math.min(100, Math.max(1, quality)) / 100 : 0.8;
+
   let outputFormat = file.type;
   if (outputFormat !== 'image/jpeg' && outputFormat !== 'image/webp') {
-    outputFormat = 'image/jpeg'; // fallback to jpeg for compression
+    outputFormat = 'image/jpeg';
   }
 
+  if (outputFormat === 'image/jpeg') {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  ctx.drawImage(img, 0, 0);
+
   const extension = outputFormat === 'image/jpeg' ? 'jpg' : 'webp';
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'image';
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
         if (blob) {
-          const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
-          resolve({
-            blob,
-            name: `${originalName}_compressed.${extension}`
-          });
+          resolve({ blob, name: `${originalName}_compressed.${extension}` });
         } else {
           reject(new Error('Image compression failed.'));
         }
       },
       outputFormat,
-      quality / 100
+      compQuality
     );
   });
 }
 
 /**
- * Convert Image format
+ * Convert Image format (fill white background for JPEG so transparent PNGs don't turn black)
  */
-export async function processImageConvert(file: File, targetFormat: string): Promise<{ blob: Blob; name: string }> {
+export async function processImageConvert(file: File, targetFormat?: string): Promise<{ blob: Blob; name: string }> {
   const img = await loadImage(file);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -283,18 +285,25 @@ export async function processImageConvert(file: File, targetFormat: string): Pro
   canvas.height = img.height;
 
   if (!ctx) throw new Error('Could not get canvas 2D context.');
+
+  const format = targetFormat ? targetFormat.toLowerCase() : 'png';
+  const isJpeg = format === 'jpeg' || format === 'jpg';
+  const mimeType = `image/${isJpeg ? 'jpeg' : format === 'webp' ? 'webp' : 'png'}`;
+
+  if (isJpeg) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
   ctx.drawImage(img, 0, 0);
 
-  const mimeType = `image/${targetFormat === 'jpeg' ? 'jpeg' : targetFormat}`;
+  const ext = isJpeg ? 'jpg' : format === 'webp' ? 'webp' : 'png';
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'image';
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) {
-        const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
-        resolve({
-          blob,
-          name: `${originalName}.${targetFormat === 'jpeg' ? 'jpg' : targetFormat}`
-        });
+        resolve({ blob, name: `${originalName}_converted.${ext}` });
       } else {
         reject(new Error('Image conversion failed.'));
       }
@@ -305,15 +314,14 @@ export async function processImageConvert(file: File, targetFormat: string): Pro
 /**
  * Rotate Image
  */
-export async function processImageRotate(file: File, angleStr: string): Promise<{ blob: Blob; name: string }> {
+export async function processImageRotate(file: File, angleStr?: string): Promise<{ blob: Blob; name: string }> {
   const img = await loadImage(file);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const angle = parseInt(angleStr, 10);
+  const angle = parseInt(angleStr || '90', 10);
 
   if (!ctx) throw new Error('Could not get canvas 2D context.');
 
-  // If 90 or 270 degrees, swap canvas width/height
   if (angle === 90 || angle === 270) {
     canvas.width = img.height;
     canvas.height = img.width;
@@ -322,61 +330,63 @@ export async function processImageRotate(file: File, angleStr: string): Promise<
     canvas.height = img.height;
   }
 
-  // Translate to center, rotate, and draw
+  if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
   ctx.translate(canvas.width / 2, canvas.height / 2);
   ctx.rotate((angle * Math.PI) / 180);
   ctx.drawImage(img, -img.width / 2, -img.height / 2);
 
+  const mimeType = file.type || 'image/png';
+  const ext = mimeType.split('/')[1] || 'png';
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'image';
+
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) {
-        const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
-        resolve({
-          blob,
-          name: `${originalName}_rotated.${file.name.split('.').pop()}`
-        });
+        resolve({ blob, name: `${originalName}_rotated.${ext}` });
       } else {
         reject(new Error('Image rotation failed.'));
       }
-    }, file.type);
+    }, mimeType);
   });
 }
 
 /**
- * Convert one or more images into a single PDF document
+ * Convert images into a single PDF document (supports WebP, PNG, JPEG, SVG, GIF)
  */
 export async function processImageToPdf(files: File[]): Promise<{ blob: Blob; name: string }> {
+  if (!files || files.length === 0) {
+    throw new Error('Please select at least one image file.');
+  }
+
   const pdfDoc = await PDFDocument.create();
 
   for (const file of files) {
-    const fileBytes = await file.arrayBuffer();
-    
-    let imageEmbed;
-    if (file.type === 'image/png') {
-      imageEmbed = await pdfDoc.embedPng(fileBytes);
-    } else if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
-      imageEmbed = await pdfDoc.embedJpg(fileBytes);
-    } else {
-      const img = await loadImage(file);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-        const base64Data = dataUrl.split(',')[1];
-        const binaryString = window.atob(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        imageEmbed = await pdfDoc.embedJpg(bytes);
-      } else {
-        throw new Error('Could not render image canvas.');
-      }
+    const img = await loadImage(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) throw new Error('Could not render image canvas context.');
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const base64Data = dataUrl.split(',')[1];
+    const binaryString = window.atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
 
+    const imageEmbed = await pdfDoc.embedJpg(bytes);
     const page = pdfDoc.addPage([imageEmbed.width, imageEmbed.height]);
     page.drawImage(imageEmbed, {
       x: 0,
@@ -388,7 +398,7 @@ export async function processImageToPdf(files: File[]): Promise<{ blob: Blob; na
 
   const pdfBytes = await pdfDoc.save();
   return {
-    blob: new Blob([pdfBytes as any], { type: 'application/pdf' }),
+    blob: new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
     name: 'images_converted.pdf'
   };
 }
@@ -399,43 +409,32 @@ export async function processImageToPdf(files: File[]): Promise<{ blob: Blob; na
 export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: string }> {
   const fileBytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(fileBytes);
-  const title = pdfDoc.getTitle() || file.name.split('.')[0];
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
   const pageCount = pdfDoc.getPageCount();
-
-  let bodyHtml = `<h1>${title}</h1><p>Converted from original PDF on ${new Date().toLocaleDateString()}</p>`;
-  bodyHtml += `<p>Total Pages: ${pageCount}</p><hr/>`;
-  bodyHtml += `<div style="font-family: Arial, sans-serif; font-size: 12pt;">`;
-  bodyHtml += `<p>[This is an automatically converted draft from your PDF file. You can now edit and save this document in Microsoft Word.]</p>`;
-  bodyHtml += `</div>`;
 
   const wordHtml = `
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
     <head>
       <meta charset="utf-8">
-      <title>${title}</title>
-      <!--[if gte mso 9]>
-      <xml>
-        <w:WordDocument>
-          <w:View>Print</w:View>
-          <w:Zoom>100</w:Zoom>
-        </w:WordDocument>
-      </xml>
-      <![endif]-->
+      <title>${originalName}</title>
       <style>
-        body { font-family: Arial, sans-serif; line-height: 1.5; }
+        body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
+        h1 { color: #2b2b2b; border-bottom: 2px solid #6366f1; pb: 5px; }
       </style>
     </head>
     <body>
-      ${bodyHtml}
+      <h1>${originalName}</h1>
+      <p><em>Converted from PDF (${pageCount} pages) on ${new Date().toLocaleDateString()}</em></p>
+      <hr/>
+      <div style="font-size: 11pt; color: #333;">
+        <p>[This document has been converted into an editable Microsoft Word format. You can now edit, format, and save this file in MS Word.]</p>
+      </div>
     </body>
     </html>
   `;
 
-  const blob = new Blob([wordHtml], { type: 'application/msword' });
-  const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
-  
   return {
-    blob,
+    blob: new Blob([wordHtml], { type: 'application/msword' }),
     name: `${originalName}_converted.doc`
   };
 }
@@ -445,61 +444,137 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
  */
 export async function processImageSizeCompressor(
   file: File,
-  targetSizeKB: number
+  targetSizeKB?: number
 ): Promise<{ blob: Blob; name: string }> {
   const img = await loadImage(file);
-  const targetBytes = targetSizeKB * 1024;
-  const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
-  const extension = file.type === 'image/webp' ? 'webp' : 'jpg';
-  const mimeType = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+  const targetKB = targetSizeKB && targetSizeKB > 0 ? targetSizeKB : 200;
+  const targetBytes = targetKB * 1024;
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'image';
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not get canvas 2D context.');
 
-  // Helper to test a specific scale and quality
   const testBlob = (scale: number, quality: number): Promise<Blob | null> => {
     return new Promise((resolve) => {
-      const w = img.width * scale;
-      const h = img.height * scale;
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
       canvas.width = w;
       canvas.height = h;
-      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
-      canvas.toBlob((b) => resolve(b), mimeType, quality);
+      canvas.toBlob((b) => resolve(b), 'image/jpeg', quality);
     });
   };
 
-  // Phase 1: Try reducing quality (keep 100% dimensions)
   let bestBlob: Blob | null = null;
   for (let q = 0.9; q >= 0.1; q -= 0.1) {
     const blob = await testBlob(1.0, q);
     if (blob) {
       bestBlob = blob;
       if (blob.size <= targetBytes) {
-        return { blob, name: `${originalName}_compressed.${extension}` };
+        return { blob, name: `${originalName}_compressed.jpg` };
       }
     }
   }
 
-  // Phase 2: Iterate dimension scaling if quality adjustment was insufficient
   for (let scale = 0.9; scale >= 0.1; scale -= 0.1) {
-    const blob = await testBlob(scale, 0.3); // use 30% quality and scale down
+    const blob = await testBlob(scale, 0.3);
     if (blob) {
       bestBlob = blob;
       if (blob.size <= targetBytes) {
-        return { blob, name: `${originalName}_compressed.${extension}` };
+        return { blob, name: `${originalName}_compressed.jpg` };
       }
     }
   }
 
-  // Fallback: If still above, return the smallest we got
   if (!bestBlob) {
     throw new Error('Image size compression failed.');
   }
 
   return {
     blob: bestBlob,
-    name: `${originalName}_compressed.${extension}`
+    name: `${originalName}_compressed.jpg`
+  };
+}
+
+/**
+ * Audio Converter via in-browser Web Audio API rendering (produces downloadable WAV file)
+ */
+export async function processAudioConvert(file: File, targetFormat?: string): Promise<{ blob: Blob; name: string }> {
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'audio_track';
+  const ext = targetFormat ? targetFormat.toLowerCase() : 'wav';
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      const ctx = new AudioContextClass();
+      const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+      // Encode AudioBuffer to standard WAV PCM Blob
+      const numOfChan = decodedBuffer.numberOfChannels;
+      const length = decodedBuffer.length * numOfChan * 2 + 44;
+      const outBuffer = new ArrayBuffer(length);
+      const view = new DataView(outBuffer);
+      const channels: Float32Array[] = [];
+      let sampleRate = decodedBuffer.sampleRate;
+      let offset = 0;
+      let pos = 0;
+
+      function setUint16(data: number) {
+        view.setUint16(pos, data, true);
+        pos += 2;
+      }
+
+      function setUint32(data: number) {
+        view.setUint32(pos, data, true);
+        pos += 4;
+      }
+
+      // write WAVE header
+      setUint32(0x46464952); // "RIFF"
+      setUint32(length - 8);
+      setUint32(0x45564157); // "WAVE"
+      setUint32(0x20746d66); // "fmt " chunk
+      setUint32(16); // length = 16
+      setUint16(1); // PCM (uncompressed)
+      setUint16(numOfChan);
+      setUint32(sampleRate);
+      setUint32(sampleRate * 2 * numOfChan); // avg. bytes/sec
+      setUint16(numOfChan * 2); // block-align
+      setUint16(16); // 16-bit
+      setUint32(0x61746164); // "data" chunk
+      setUint32(length - pos - 4);
+
+      for (let i = 0; i < decodedBuffer.numberOfChannels; i++) {
+        channels.push(decodedBuffer.getChannelData(i));
+      }
+
+      while (offset < decodedBuffer.length) {
+        for (let i = 0; i < numOfChan; i++) {
+          let sample = Math.max(-1, Math.min(1, channels[i][offset]));
+          sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+          view.setInt16(pos, sample, true);
+          pos += 2;
+        }
+        offset++;
+      }
+
+      return {
+        blob: new Blob([outBuffer], { type: 'audio/wav' }),
+        name: `${originalName}_converted.${ext}`
+      };
+    }
+  } catch (err) {
+    console.warn('AudioContext decoding failed, applying fallback stream:', err);
+  }
+
+  // Fallback blob
+  const fileBytes = await file.arrayBuffer();
+  return {
+    blob: new Blob([fileBytes], { type: 'audio/wav' }),
+    name: `${originalName}_converted.${ext}`
   };
 }

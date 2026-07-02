@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { Search, FolderOpen, ArrowRight, Sparkles, FileText, LayoutTemplate, HelpCircle } from 'lucide-react';
+import { Search, FolderOpen, ArrowRight, Sparkles, FileText, LayoutTemplate, HelpCircle, FileSearch, Mail } from 'lucide-react';
 import { TOOLS, TOOL_CATEGORIES } from '@/lib/tools-config';
 
 export default function Home() {
@@ -83,13 +83,27 @@ export default function Home() {
               {value.name}
             </button>
           ))}
-          {/* Resume and About shortcuts */}
+          {/* Career Suite shortcuts */}
           <Link
             href="/tools/resume"
             className="rounded-xl px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-slate-900/60 text-slate-400 border border-slate-850 hover:text-white hover:bg-slate-850 transition-all flex items-center gap-1.5"
           >
             <LayoutTemplate className="h-3.5 w-3.5" />
             Resume Builder
+          </Link>
+          <Link
+            href="/tools/ats-checker"
+            className="rounded-xl px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-slate-900/60 text-slate-400 border border-slate-850 hover:text-white hover:bg-slate-850 transition-all flex items-center gap-1.5"
+          >
+            <FileSearch className="h-3.5 w-3.5" />
+            ATS Checker
+          </Link>
+          <Link
+            href="/tools/cover-letter"
+            className="rounded-xl px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-slate-900/60 text-slate-400 border border-slate-850 hover:text-white hover:bg-slate-850 transition-all flex items-center gap-1.5"
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Cover Letter
           </Link>
         </div>
       </div>

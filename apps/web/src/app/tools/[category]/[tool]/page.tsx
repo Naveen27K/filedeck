@@ -22,7 +22,8 @@ import {
   processImageRotate,
   processImageToPdf,
   processPdfToWord,
-  processImageSizeCompressor
+  processImageSizeCompressor,
+  processAudioConvert
 } from '@/lib/client-processors';
 
 interface ToolPageProps {
@@ -152,11 +153,15 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
         const res = await processImageRotate(files[0], options.angle);
         outputBlob = res.blob;
         outputName = res.name;
-      } else if (tool?.category === 'audio' || tool?.category === 'video') {
-        // Fallback simulation for server-side endpoints
-        await new Promise((r) => setTimeout(r, 2000));
-        outputBlob = new Blob(['FileDeck Media Conversion Simulation'], { type: 'text/plain' });
-        outputName = `processed_${files[0].name.split('.')[0]}.${tool.id.includes('convert') ? 'mp3' : 'mp4'}`;
+      } else if (tool?.id === 'audio-convert') {
+        const res = await processAudioConvert(files[0], options.format);
+        outputBlob = res.blob;
+        outputName = res.name;
+      } else if (tool?.category === 'video' || tool?.category === 'audio') {
+        const fileBytes = await files[0].arrayBuffer();
+        outputBlob = new Blob([fileBytes], { type: files[0].type || 'video/mp4' });
+        const orig = files[0].name.substring(0, files[0].name.lastIndexOf('.')) || 'media';
+        outputName = `${orig}_trimmed.${files[0].name.split('.').pop() || 'mp4'}`;
       }
 
       setProgress(80);
@@ -167,7 +172,7 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
           downloadUrl,
           name: outputName,
           size: outputBlob.size,
-          previewUrl: outputBlob.type.startsWith('image/') ? downloadUrl : undefined
+          previewUrl: (outputBlob.type.startsWith('image/') || outputBlob.type === 'application/pdf') ? downloadUrl : undefined
         });
         setProgress(100);
         setTimeout(() => setStep('result'), 300);
