@@ -1,0 +1,14 @@
+{
+  "name": "filedeck-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix apps/web",
+    "dev:web": "npm run dev --prefix apps/web",
+    "dev:api": "npm run dev --prefix apps/api",
+    "build:web": "npm run build --prefix apps/web",
+    "build:api": "npm run build --prefix apps/api",
+    "install:web": "npm install --prefix apps/web",
+    "install:api": "npm install --prefix apps/api"
+  }
+}

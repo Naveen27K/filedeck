@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for logs, metadata, and resume drafts
+  db:
+    image: postgres:15-alpine
+    container_name: filedeck-db
+    restart: always
+    environment:
+      POSTGRES_USER: filedeck
+      POSTGRES_PASSWORD: filedeckpassword
+      POSTGRES_DB: filedeck
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Redis for background jobs and task queueing (FFmpeg, LibreOffice)
+  redis:
+    image: redis:7-alpine
+    container_name: filedeck-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Express Backend API service wrapper
+  api:
+    build:
+      context: .
+      dockerfile: ./apps/api/Dockerfile
+    container_name: filedeck-api
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://filedeck:filedeckpassword@db:5432/filedeck?schema=public
+      - REDIS_URL=redis://redis:6379
+      - PORT=5000
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
