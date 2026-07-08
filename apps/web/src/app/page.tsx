@@ -28,10 +28,6 @@ export default function Home() {
 
       {/* Hero Section */}
       <div className="relative mx-auto max-w-5xl px-4 pt-20 pb-16 text-center sm:px-6 lg:px-8">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-400 ring-1 ring-inset ring-violet-500/20 shadow-sm shadow-violet-500/5 mb-6">
-          <Sparkles className="h-3.5 w-3.5" />
-          No AI, No Limits, 100% Free
-        </span>
         <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-6xl">
           One Deck. All Your{' '}
           <span className="bg-gradient-to-r from-violet-400 via-violet-500 to-indigo-400 bg-clip-text text-transparent">
