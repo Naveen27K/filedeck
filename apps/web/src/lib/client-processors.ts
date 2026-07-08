@@ -379,14 +379,13 @@ export async function processImageToPdf(files: File[]): Promise<{ blob: Blob; na
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0);
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    const base64Data = dataUrl.split(',')[1];
-    const binaryString = window.atob(base64Data);
-    const bytes = new Uint8Array(binaryString.length);
-
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) resolve(b);
+        else reject(new Error('Failed to convert canvas to blob'));
+      }, 'image/jpeg', 0.92);
+    });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
 
     const imageEmbed = await pdfDoc.embedJpg(bytes);
     const page = pdfDoc.addPage([imageEmbed.width, imageEmbed.height]);
@@ -417,7 +416,15 @@ function loadPdfJs(): Promise<any> {
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
     script.onload = () => {
       const pdfjsLib = (window as any).pdfjsLib;
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      try {
+        // Bypass Same-Origin restrictions for loading web workers from cross-origin CDN
+        const workerCode = `importScripts('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js');`;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+      } catch (err) {
+        console.warn('Failed to configure worker proxy, falling back to CDN worker directly:', err);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
       resolve(pdfjsLib);
     };
     script.onerror = () => {
@@ -596,65 +603,73 @@ export async function processAudioConvert(file: File, targetFormat?: string): Pr
 
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioContextClass) {
-      const ctx = new AudioContextClass();
-      const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const OfflineCtxClass = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+    
+    let decodedBuffer: AudioBuffer;
+    if (OfflineCtxClass) {
+      const tempCtx = new OfflineCtxClass(1, 1, 44100);
+      decodedBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+    } else if (AudioCtxClass) {
+      const tempCtx = new AudioCtxClass();
+      decodedBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+    } else {
+      throw new Error('No AudioContext support found in this browser.');
+    }
 
-      // Encode AudioBuffer to standard WAV PCM Blob
-      const numOfChan = decodedBuffer.numberOfChannels;
-      const length = decodedBuffer.length * numOfChan * 2 + 44;
-      const outBuffer = new ArrayBuffer(length);
-      const view = new DataView(outBuffer);
-      const channels: Float32Array[] = [];
-      let sampleRate = decodedBuffer.sampleRate;
-      let offset = 0;
-      let pos = 0;
+    // Encode AudioBuffer to standard WAV PCM Blob
+    const numOfChan = decodedBuffer.numberOfChannels;
+    const length = decodedBuffer.length * numOfChan * 2 + 44;
+    const outBuffer = new ArrayBuffer(length);
+    const view = new DataView(outBuffer);
+    const channels: Float32Array[] = [];
+    let sampleRate = decodedBuffer.sampleRate;
+    let offset = 0;
+    let pos = 0;
 
-      function setUint16(data: number) {
-        view.setUint16(pos, data, true);
+    function setUint16(data: number) {
+      view.setUint16(pos, data, true);
+      pos += 2;
+    }
+
+    function setUint32(data: number) {
+      view.setUint32(pos, data, true);
+      pos += 4;
+    }
+
+    // write WAVE header
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8);
+    setUint32(0x45564157); // "WAVE"
+    setUint32(0x20746d66); // "fmt " chunk
+    setUint32(16); // length = 16
+    setUint16(1); // PCM (uncompressed)
+    setUint16(numOfChan);
+    setUint32(sampleRate);
+    setUint32(sampleRate * 2 * numOfChan); // avg. bytes/sec
+    setUint16(numOfChan * 2); // block-align
+    setUint16(16); // 16-bit
+    setUint32(0x61746164); // "data" chunk
+    setUint32(length - pos - 4);
+
+    for (let i = 0; i < decodedBuffer.numberOfChannels; i++) {
+      channels.push(decodedBuffer.getChannelData(i));
+    }
+
+    while (offset < decodedBuffer.length) {
+      for (let i = 0; i < numOfChan; i++) {
+        let sample = Math.max(-1, Math.min(1, channels[i][offset]));
+        sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+        view.setInt16(pos, sample, true);
         pos += 2;
       }
-
-      function setUint32(data: number) {
-        view.setUint32(pos, data, true);
-        pos += 4;
-      }
-
-      // write WAVE header
-      setUint32(0x46464952); // "RIFF"
-      setUint32(length - 8);
-      setUint32(0x45564157); // "WAVE"
-      setUint32(0x20746d66); // "fmt " chunk
-      setUint32(16); // length = 16
-      setUint16(1); // PCM (uncompressed)
-      setUint16(numOfChan);
-      setUint32(sampleRate);
-      setUint32(sampleRate * 2 * numOfChan); // avg. bytes/sec
-      setUint16(numOfChan * 2); // block-align
-      setUint16(16); // 16-bit
-      setUint32(0x61746164); // "data" chunk
-      setUint32(length - pos - 4);
-
-      for (let i = 0; i < decodedBuffer.numberOfChannels; i++) {
-        channels.push(decodedBuffer.getChannelData(i));
-      }
-
-      while (offset < decodedBuffer.length) {
-        for (let i = 0; i < numOfChan; i++) {
-          let sample = Math.max(-1, Math.min(1, channels[i][offset]));
-          sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
-          view.setInt16(pos, sample, true);
-          pos += 2;
-        }
-        offset++;
-      }
-
-      return {
-        blob: new Blob([outBuffer], { type: 'audio/wav' }),
-        name: `${originalName}_converted.${ext}`
-      };
+      offset++;
     }
+
+    return {
+      blob: new Blob([outBuffer], { type: 'audio/wav' }),
+      name: `${originalName}_converted.${ext}`
+    };
   } catch (err) {
     console.warn('AudioContext decoding failed, applying fallback stream:', err);
   }
@@ -665,4 +680,125 @@ export async function processAudioConvert(file: File, targetFormat?: string): Pr
     blob: new Blob([fileBytes], { type: 'audio/wav' }),
     name: `${originalName}_converted.${ext}`
   };
+}
+
+/**
+ * Video Trimmer using browser-native MediaRecorder and HTMLVideoElement
+ */
+export async function processVideoTrim(
+  file: File,
+  start: number,
+  end: number,
+  onProgress?: (progress: number) => void
+): Promise<{ blob: Blob; name: string }> {
+  const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'video';
+  const ext = file.name.split('.').pop() || 'mp4';
+
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.src = URL.createObjectURL(file);
+    video.muted = true;
+    video.playsInline = true;
+
+    // Append hidden video to body so captureStream works reliably in all browsers
+    video.style.position = 'fixed';
+    video.style.top = '-9999px';
+    video.style.left = '-9999px';
+    video.style.width = '160px';
+    video.style.height = '120px';
+    document.body.appendChild(video);
+
+    const cleanup = () => {
+      URL.revokeObjectURL(video.src);
+      video.remove();
+    };
+
+    video.onloadedmetadata = () => {
+      const duration = video.duration;
+      const actualStart = Math.max(0, Math.min(start, duration));
+      const actualEnd = Math.max(actualStart, Math.min(end, duration));
+      const trimDuration = actualEnd - actualStart;
+
+      if (trimDuration <= 0) {
+        cleanup();
+        reject(new Error('Invalid trim range: Start time must be less than End time.'));
+        return;
+      }
+
+      // Capture stream
+      let stream: MediaStream;
+      try {
+        if ((video as any).captureStream) {
+          stream = (video as any).captureStream();
+        } else if ((video as any).mozCaptureStream) {
+          stream = (video as any).mozCaptureStream();
+        } else {
+          throw new Error('Browser does not support capturing stream from video elements.');
+        }
+      } catch (streamErr) {
+        cleanup();
+        reject(streamErr);
+        return;
+      }
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+          ? 'video/webm;codecs=vp9'
+          : MediaRecorder.isTypeSupported('video/webm')
+          ? 'video/webm'
+          : 'video/mp4'
+      });
+
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const recordedBlob = new Blob(chunks, { type: recorder.mimeType });
+        cleanup();
+        const outputExt = recorder.mimeType.includes('webm') ? 'webm' : ext;
+        resolve({
+          blob: recordedBlob,
+          name: `${originalName}_trimmed.${outputExt}`
+        });
+      };
+
+      // Seek to start position
+      video.currentTime = actualStart;
+
+      video.onseeked = () => {
+        video.onseeked = null; // Remove handler
+        
+        // Render 2x faster than real-time to speed up processing
+        video.playbackRate = 2.0;
+        
+        recorder.start();
+        video.play().catch((playErr) => {
+          cleanup();
+          reject(playErr);
+        });
+
+        const checkProgress = () => {
+          if (video.currentTime >= actualEnd || video.paused || video.ended) {
+            video.pause();
+            recorder.stop();
+          } else {
+            const currentProgress = ((video.currentTime - actualStart) / trimDuration) * 100;
+            if (onProgress) onProgress(currentProgress);
+            requestAnimationFrame(checkProgress);
+          }
+        };
+
+        requestAnimationFrame(checkProgress);
+      };
+    };
+
+    video.onerror = () => {
+      cleanup();
+      reject(new Error('Failed to decode or play video file.'));
+    };
+  });
 }

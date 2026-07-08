@@ -23,7 +23,8 @@ import {
   processImageToPdf,
   processPdfToWord,
   processImageSizeCompressor,
-  processAudioConvert
+  processAudioConvert,
+  processVideoTrim
 } from '@/lib/client-processors';
 
 function parseMarkdown(md: string): string {
@@ -201,6 +202,14 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
         outputName = res.name;
       } else if (tool?.id === 'audio-convert') {
         const res = await processAudioConvert(files[0], options.format);
+        outputBlob = res.blob;
+        outputName = res.name;
+      } else if (tool?.id === 'video-trim') {
+        const start = Number(options.start || 0);
+        const end = Number(options.end || 10);
+        const res = await processVideoTrim(files[0], start, end, (p) => {
+          setProgress(Math.floor(40 + p * 0.5)); // Map 0-100% video trim to 40-90% overall progress
+        });
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.category === 'video' || tool?.category === 'audio') {
