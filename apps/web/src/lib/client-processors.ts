@@ -1,4 +1,5 @@
 import { PDFDocument, degrees, rgb, StandardFonts } from 'pdf-lib';
+import { encryptPDF } from '@pdfsmaller/pdf-encrypt-lite';
 
 /**
  * Merge multiple PDF documents into a single file
@@ -112,10 +113,11 @@ export async function processPdfProtect(file: File, passwordText?: string): Prom
   pdfDoc.setSubject(`Password Encrypted Document (Key: ${pass.substring(0, 3)}***)`);
 
   const protectedPdfBytes = await pdfDoc.save();
+  const encryptedPdfBytes = await encryptPDF(protectedPdfBytes, pass);
   const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
 
   return {
-    blob: new Blob([protectedPdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
+    blob: new Blob([encryptedPdfBytes as unknown as BlobPart], { type: 'application/pdf' }),
     name: `${originalName}_protected.pdf`
   };
 }
@@ -403,6 +405,37 @@ export async function processImageToPdf(files: File[]): Promise<{ blob: Blob; na
   };
 }
 
+function loadPdfJs(): Promise<any> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Window is not defined'));
+  }
+  if ((window as any).pdfjsLib) {
+    return Promise.resolve((window as any).pdfjsLib);
+  }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      const pdfjsLib = (window as any).pdfjsLib;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve(pdfjsLib);
+    };
+    script.onerror = () => {
+      reject(new Error('Failed to load PDF.js from CDN.'));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 /**
  * Convert PDF to editable Word document (.doc)
  */
@@ -412,6 +445,60 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
   const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
   const pageCount = pdfDoc.getPageCount();
 
+  const paragraphs: string[] = [];
+
+  try {
+    const pdfjsLib = await loadPdfJs();
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes) });
+    const pdf = await loadingTask.promise;
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const items = textContent.items as any[];
+
+      // Sort items: top-to-bottom, then left-to-right
+      items.sort((a, b) => {
+        const yA = a.transform ? a.transform[5] : 0;
+        const yB = b.transform ? b.transform[5] : 0;
+        if (Math.abs(yA - yB) > 5) {
+          return yB - yA;
+        }
+        const xA = a.transform ? a.transform[4] : 0;
+        const xB = b.transform ? b.transform[4] : 0;
+        return xA - xB;
+      });
+
+      let lastY: number | null = null;
+      let lineText = '';
+
+      for (const item of items) {
+        const currentY = item.transform ? item.transform[5] : null;
+
+        if (lastY !== null && Math.abs(currentY - lastY) > 5) {
+          if (lineText.trim()) {
+            paragraphs.push(lineText.trim());
+          }
+          lineText = item.str;
+        } else {
+          lineText += (lineText ? ' ' : '') + item.str;
+        }
+        lastY = currentY;
+      }
+
+      if (lineText.trim()) {
+        paragraphs.push(lineText.trim());
+      }
+    }
+  } catch (err) {
+    console.warn('PDF.js text extraction failed, falling back to basic info:', err);
+  }
+
+  // Fallback if no text extracted or PDF.js failed
+  if (paragraphs.length === 0) {
+    paragraphs.push('[This document has been converted into an editable Microsoft Word format. You can now edit, format, and save this file in MS Word.]');
+  }
+
   const wordHtml = `
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
     <head>
@@ -420,6 +507,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
         h1 { color: #2b2b2b; border-bottom: 2px solid #6366f1; pb: 5px; }
+        p { margin-bottom: 12px; }
       </style>
     </head>
     <body>
@@ -427,7 +515,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       <p><em>Converted from PDF (${pageCount} pages) on ${new Date().toLocaleDateString()}</em></p>
       <hr/>
       <div style="font-size: 11pt; color: #333;">
-        <p>[This document has been converted into an editable Microsoft Word format. You can now edit, format, and save this file in MS Word.]</p>
+        ${paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('\n')}
       </div>
     </body>
     </html>

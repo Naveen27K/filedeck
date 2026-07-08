@@ -142,19 +142,96 @@ export default function ATSCheckerPage() {
       hasMetrics
     };
   }, [resumeText, jobDescription]);
+  
+  const loadPdfJs = (): Promise<any> => {
+    if (typeof window === 'undefined') {
+      return Promise.reject(new Error('Window is not defined'));
+    }
+    if ((window as any).pdfjsLib) {
+      return Promise.resolve((window as any).pdfjsLib);
+    }
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      script.onload = () => {
+        const pdfjsLib = (window as any).pdfjsLib;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        resolve(pdfjsLib);
+      };
+      script.onerror = () => {
+        reject(new Error('Failed to load PDF.js from CDN.'));
+      };
+      document.head.appendChild(script);
+    });
+  };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const extractPdfText = async (file: File): Promise<string> => {
+    const fileBytes = await file.arrayBuffer();
+    const pdfjsLib = await loadPdfJs();
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes) });
+    const pdf = await loadingTask.promise;
+    let text = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const items = textContent.items as any[];
+
+      // Sort items: top-to-bottom, then left-to-right
+      items.sort((a, b) => {
+        const yA = a.transform ? a.transform[5] : 0;
+        const yB = b.transform ? b.transform[5] : 0;
+        if (Math.abs(yA - yB) > 5) {
+          return yB - yA;
+        }
+        const xA = a.transform ? a.transform[4] : 0;
+        const xB = b.transform ? b.transform[4] : 0;
+        return xA - xB;
+      });
+
+      let lastY: number | null = null;
+      let pageText = '';
+
+      for (const item of items) {
+        const currentY = item.transform ? item.transform[5] : null;
+
+        if (lastY !== null && Math.abs(currentY - lastY) > 5) {
+          pageText += '\n' + item.str;
+        } else {
+          pageText += (pageText ? ' ' : '') + item.str;
+        }
+        lastY = currentY;
+      }
+      text += pageText + '\n';
+    }
+    return text;
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        if (text) {
-          setResumeText(text);
-          setAnalyzed(true);
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        try {
+          const text = await extractPdfText(file);
+          if (text) {
+            setResumeText(text);
+            setAnalyzed(true);
+          }
+        } catch (err) {
+          console.error(err);
+          alert('Failed to parse PDF resume text. Please copy/paste instead.');
         }
-      };
-      reader.readAsText(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const text = event.target?.result as string;
+          if (text) {
+            setResumeText(text);
+            setAnalyzed(true);
+          }
+        };
+        reader.readAsText(file);
+      }
     }
   };
 
@@ -196,8 +273,8 @@ export default function ATSCheckerPage() {
                 Your Resume Text
               </label>
               <label className="text-xs text-violet-400 hover:text-violet-300 font-semibold cursor-pointer">
-                Upload .TXT / File
-                <input type="file" accept=".txt,.doc,.docx" onChange={handleFileUpload} className="hidden" />
+                Upload .PDF / .TXT
+                <input type="file" accept=".txt,.pdf" onChange={handleFileUpload} className="hidden" />
               </label>
             </div>
             <textarea

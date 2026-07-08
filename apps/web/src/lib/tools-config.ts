@@ -354,7 +354,7 @@ export const TOOLS: ToolConfig[] = [
     id: 'audio-convert',
     name: 'Audio Converter',
     category: 'audio',
-    description: 'Convert audio tracks between MP3, WAV, M4A, and OGG.',
+    description: 'Convert audio tracks into high-fidelity, uncompressed WAV format.',
     icon: Music,
     accept: 'audio/*',
     maxSizeMB: 50,
@@ -364,11 +364,9 @@ export const TOOLS: ToolConfig[] = [
         name: 'format',
         label: 'Target Format',
         type: 'select',
-        defaultValue: 'mp3',
+        defaultValue: 'wav',
         options: [
-          { label: 'MP3 (.mp3)', value: 'mp3' },
-          { label: 'WAV (.wav)', value: 'wav' },
-          { label: 'M4A (.m4a)', value: 'm4a' }
+          { label: 'WAV (.wav)', value: 'wav' }
         ]
       }
     ]

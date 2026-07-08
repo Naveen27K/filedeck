@@ -26,6 +26,52 @@ import {
   processAudioConvert
 } from '@/lib/client-processors';
 
+function parseMarkdown(md: string): string {
+  let html = md;
+  
+  // Escape html characters to avoid XSS injections
+  html = html
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Code blocks (multiline)
+  html = html.replace(/```([\s\S]*?)```/g, '<pre class="bg-slate-900 text-slate-100 p-4 rounded-lg my-4 overflow-x-auto font-mono text-xs">$1</pre>');
+
+  // Headings
+  html = html.replace(/^# (.*?)$/gm, '<h1 class="text-2xl font-bold text-white mt-6 mb-3">$1</h1>');
+  html = html.replace(/^## (.*?)$/gm, '<h2 class="text-xl font-bold text-white mt-5 mb-2">$1</h2>');
+  html = html.replace(/^### (.*?)$/gm, '<h3 class="text-lg font-bold text-white mt-4 mb-2">$1</h3>');
+
+  // Blockquotes
+  html = html.replace(/^&gt;\s?(.*?)$/gm, '<blockquote class="border-l-4 border-violet-500 pl-4 py-1 my-3 text-slate-400 italic bg-slate-900/30 rounded-r">$1</blockquote>');
+
+  // Inline code
+  html = html.replace(/`([^`\n]+)`/g, '<code class="bg-slate-900 text-violet-400 px-1.5 py-0.5 rounded font-mono text-xs">$1</code>');
+
+  // Bold & Italic
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-bold text-white">$1</strong>');
+  html = html.replace(/\*([^*]+)\*/g, '<em class="italic">$1</em>');
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-violet-400 hover:text-violet-300 underline">$1</a>');
+
+  // Lists
+  html = html.replace(/^\s*[\-\*]\s+(.*?)$/gm, '<li class="list-disc ml-5 my-1 text-slate-350">$1</li>');
+  html = html.replace(/^\s*\d+\.\s+(.*?)$/gm, '<li class="list-decimal ml-5 my-1 text-slate-350">$1</li>');
+
+  // Paragraph wrapping
+  const blocks = html.split(/\n\n+/);
+  html = blocks.map(block => {
+    if (/^\s*<(h\d|pre|blockquote|li)/i.test(block)) {
+      return block;
+    }
+    return `<p class="mb-4 leading-relaxed">${block.replace(/\n/g, '<br/>')}</p>`;
+  }).join('\n');
+
+  return html;
+}
+
 interface ToolPageProps {
   params: Promise<{ category: string; tool: string }>;
 }
@@ -718,7 +764,7 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
             <div
               className="h-96 rounded-xl border border-slate-800 bg-slate-950 p-4 overflow-y-auto text-slate-300 prose prose-invert prose-sm"
               dangerouslySetInnerHTML={{
-                __html: tool.id === 'markdown-editor' ? `<pre>${inputText}</pre>` : inputText
+                __html: tool.id === 'markdown-editor' ? parseMarkdown(inputText) : inputText
               }}
             />
           </div>
