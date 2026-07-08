@@ -1,21 +1,130 @@
 @import "tailwindcss";
 
 :root {
-  --background: #020617;
-  --foreground: #f8fafc;
+  --background: #ffffff;
+  --foreground: #0f172a;
 }
 
-@theme inline {
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Map slate colors to light mode counterparts (dark slate -> white/light grey, light slate -> dark grey/black) */
+  --color-slate-950: #ffffff;
+  --color-slate-900: #cbd5e1; /* used for card borders and card bg tints */
+  --color-slate-850: #e2e8f0;
+  --color-slate-800: #cbd5e1;
+  --color-slate-700: #94a3b8;
+  --color-slate-600: #64748b;
+  --color-slate-500: #475569;
+  --color-slate-400: #334155;
+  --color-slate-350: #1e293b;
+  --color-slate-300: #1e293b;
+  --color-slate-200: #0f172a;
+  --color-slate-100: #0f172a;
+
+  /* Redefine violet (which is our main accent purple color) */
+  --color-violet-950: #faf5ff;
+  --color-violet-900: #f3e8ff;
+  --color-violet-850: #e9d5ff;
+  --color-violet-800: #d8b4fe;
+  --color-violet-700: #a78bfa;
+  --color-violet-600: #7c3aed; /* Primary Purple */
+  --color-violet-500: #8b5cf6;
+  --color-violet-400: #6d28d9;
+  --color-violet-300: #5b21b6;
+  --color-violet-200: #4c1d95;
+  --color-violet-100: #2e1065;
+
+  /* Override border radiuses for sharp edges */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Base Light Mode Typography and Component Overrides */
+
+/* Make headings, labels, strong, and main text dark when originally text-white */
+h1.text-white,
+h2.text-white,
+h3.text-white,
+h4.text-white,
+h5.text-white,
+h6.text-white,
+p.text-white,
+strong.text-white,
+span.text-white:not(.bg-violet-600 *):not(.bg-violet-500 *):not(.bg-emerald-500 *):not(.bg-rose-500 *):not(.bg-indigo-500 *) {
+  color: #0f172a !important;
+}
+
+/* Force hover text on links to violet/purple */
+a.text-slate-300:hover, 
+a.text-slate-400:hover,
+a.text-slate-500:hover,
+button.text-slate-300:hover,
+button.text-slate-400:hover,
+button.text-slate-500:hover {
+  color: #7c3aed !important;
+}
+
+/* If the element has a bg-violet or bg-indigo background, hover:text-white should stay white */
+.bg-violet-600:hover,
+.bg-violet-500:hover,
+.bg-violet-600 *:hover,
+.bg-violet-500 *:hover,
+.bg-indigo-600:hover,
+.bg-indigo-500:hover,
+.bg-indigo-600 *:hover,
+.bg-indigo-500 *:hover {
+  color: #ffffff !important;
+}
+
+/* Otherwise, if a link/button is not inside a purple/colored bg, map hover:text-white to violet-600 */
+a.hover\:text-white:hover:not(.bg-violet-600 *):not(.bg-violet-500 *):not(.bg-indigo-600 *):not(.bg-indigo-500 *):not(.bg-rose-500 *):not(.bg-emerald-500 *),
+button.hover\:text-white:hover:not(.bg-violet-600 *):not(.bg-violet-500 *):not(.bg-indigo-600 *):not(.bg-indigo-500 *):not(.bg-rose-500 *):not(.bg-emerald-500 *) {
+  color: #7c3aed !important;
+}
+
+/* Ensure buttons/badges with violet backgrounds have white text */
+.bg-violet-600, 
+.bg-violet-500,
+.bg-violet-600 *,
+.bg-violet-500 * {
+  color: #ffffff !important;
+}
+
+/* Hover effects for cards to pop in purple */
+.group:hover.border-slate-850 {
+  border-color: #7c3aed !important;
+  box-shadow: 4px 4px 0px 0px rgba(124, 58, 237, 0.15) !important;
+}
+.group:hover.border-slate-900 {
+  border-color: #7c3aed !important;
+  box-shadow: 4px 4px 0px 0px rgba(124, 58, 237, 0.15) !important;
+}
+
+/* Make inputs look sharp and clean in light mode */
+input, textarea, select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: #7c3aed !important;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1) !important;
 }
 
 @media print {
