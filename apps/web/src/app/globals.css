@@ -136,23 +136,48 @@ input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1) !important;
 }
 
-/* Ensure slate text classes on white background pages have high-contrast readability */
-p.text-slate-800,
-p.text-slate-700,
-p.text-slate-650,
-p.text-slate-600,
-p.text-slate-500,
-span.text-slate-800,
-span.text-slate-700,
-span.text-slate-650,
-span.text-slate-600,
-span.text-slate-500,
-div.text-slate-800,
-div.text-slate-700,
-div.text-slate-650,
-div.text-slate-600,
-div.text-slate-500 {
-  color: #334155 !important;
+/* Targeted overrides for resume and cover letter sheet previews to ensure crisp, dark letters and high contrast */
+#resume-sheet,
+#cover-letter-sheet,
+#resume-sheet *,
+#cover-letter-sheet * {
+  color: #0f172a !important; /* Near black text for all general elements */
+}
+
+/* Maintain beautiful violet styling accents for headings and links on the sheets */
+#resume-sheet .text-violet-900,
+#resume-sheet h3.text-violet-900,
+#cover-letter-sheet .text-violet-900,
+#cover-letter-sheet h3.text-violet-900 {
+  color: #4c1d95 !important; /* Deep Purple for section headers */
+}
+
+#cover-letter-sheet .text-violet-950,
+#cover-letter-sheet h2.text-violet-950 {
+  color: #2e1065 !important; /* Darkest Purple for cover letter name */
+}
+
+#cover-letter-sheet .text-violet-600,
+#cover-letter-sheet p.text-violet-600,
+#resume-sheet .text-violet-600,
+#resume-sheet span.text-violet-600 {
+  color: #7c3aed !important; /* Vibrant Purple */
+}
+
+#resume-sheet .border-violet-100 {
+  border-color: #ede9fe !important;
+}
+
+#cover-letter-sheet .border-violet-600 {
+  border-color: #7c3aed !important;
+}
+
+/* Make secondary metadata text like dates and locations slightly softer but highly readable */
+#resume-sheet .text-slate-600,
+#resume-sheet .text-slate-500,
+#cover-letter-sheet .text-slate-600,
+#cover-letter-sheet .text-slate-500 {
+  color: #475569 !important; /* Slate-600 (dark grey) */
 }
 
 @media print {
