@@ -531,7 +531,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           const minX = Math.min(...pendingItems.map((item) => item.transform[4]));
           const maxX = Math.max(...pendingItems.map((item) => item.transform[4] + (item.width || 0)));
           const heights = pendingItems.map((item) => Math.abs(item.transform[3]) || item.height || 10);
-          const avgHeight = heights.reduce((sum, h) => sum + h, 0) / heights.length;
+          const avgHeight = Math.max(...heights);
 
           // Alignment heuristic
           let alignment: 'left' | 'center' | 'right' = 'left';
@@ -565,7 +565,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             text: trimmedText,
             alignment,
             fontSize: Math.round(avgHeight * 0.95),
-            isHeading: avgHeight > 12.5 && !isList,
+            isHeading: avgHeight > 11.0 && !isList,
             isList
           });
         }
@@ -644,7 +644,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             rightText: lineRightText.trim(),
             alignment: 'left',
             fontSize: Math.round(avgLineHeight * 0.95),
-            isHeading: avgLineHeight > 12.5
+            isHeading: avgLineHeight > 11.0
           });
 
           lastLineY = currentLineY;
@@ -668,7 +668,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
               rightText: rightText,
               alignment: 'left',
               fontSize: Math.round(avgLineHeight * 0.95),
-              isHeading: avgLineHeight > 12.5
+              isHeading: avgLineHeight > 11.0
             });
 
             lastLineY = currentLineY;
@@ -768,6 +768,11 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         div.Section1 {
           page: Section1;
         }
+
+        /* Enforce global font family override */
+        body, p, td, span, h2, table, a, b, li {
+          font-family: Arial, Helvetica, sans-serif !important;
+        }
       </style>
     </head>
     <body>
@@ -779,12 +784,12 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             return `
               <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 4pt; border: none;">
                 <tr style="border: none;">
-                  <td align="left" valign="top" style="padding: 0; border: none;">
+                  <td align="left" valign="top" style="padding: 0; border: none; text-align: left;">
                     <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
                       ${p.isHeading ? `<b>${leftContent}</b>` : leftContent}
                     </span>
                   </td>
-                  <td align="right" valign="top" style="padding: 0; border: none;">
+                  <td align="right" valign="top" style="padding: 0; border: none; text-align: right;">
                     <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
                       ${p.isHeading ? `<b>${rightContent}</b>` : rightContent}
                     </span>
