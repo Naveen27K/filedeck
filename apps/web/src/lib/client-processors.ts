@@ -688,7 +688,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const currentHeight = Math.abs(item.transform[3]) || item.height || 10;
             if (prevX !== null && prevWidth !== null) {
               const gap = currentX - (prevX + prevWidth);
-              const spaceThreshold = currentHeight * 0.28; // Prevents letter splitting in uppercase headers
+              const spaceThreshold = currentHeight * 0.18; // Prevents letter splitting in uppercase headers
               
               // Skip spaces around punctuation, URLs, and phone number dashes
               const isSpecialChar = (char: string) => /[-.@/\\+:_~#?=%&\[\]()]/.test(char);
@@ -735,7 +735,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           lineFullText = joinItems(line);
 
           // Split dates if there is a date range at the end of the line
-          const dateRangeRegex = /\b((?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?\d{4}\s*[-–]\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?\d{4}|Present))|(?:\d{4}\s*[-–]\s*(?:\d{4}|Present)))\s*$/i;
+          const dateRangeRegex = /((?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?\d{4}\s*[-–]\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?\d{4}|Present))|(?:\d{4}\s*[-–]\s*(?:\d{4}|Present)))\s*$/i;
           const match = lineFullText.match(dateRangeRegex);
 
           if (match) {
