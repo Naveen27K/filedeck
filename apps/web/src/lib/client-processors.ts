@@ -444,10 +444,14 @@ function escapeHtml(text: string): string {
 }
 
 interface ParagraphData {
-  text: string;
+  text?: string;
+  leftText?: string;
+  rightText?: string;
   alignment: 'left' | 'center' | 'right';
   fontSize: number;
   isHeading: boolean;
+  isList?: boolean;
+  isDualColumn?: boolean;
 }
 
 /**
@@ -471,35 +475,51 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       const textContent = await page.getTextContent();
       const viewport = page.getViewport({ scale: 1.0 });
       const pageWidth = viewport.width || 595.27; // Default A4 width in points
-      
+
       const textItems = (textContent.items as any[]).filter(
         (item) => item && typeof item.str === 'string' && Array.isArray(item.transform)
       );
 
-      // Sort items: top-to-bottom (Y descending), then left-to-right (X ascending)
-      textItems.sort((a, b) => {
-        const yA = a.transform[5];
-        const yB = b.transform[5];
-        if (Math.abs(yA - yB) > 5) {
-          return yB - yA;
+      // Sort items: primarily top-to-bottom (Y descending)
+      textItems.sort((a, b) => b.transform[5] - a.transform[5]);
+
+      // Group items into lines where vertical coordinate difference is small (<= 4 points)
+      const lines: any[][] = [];
+      let currentLine: any[] = [];
+
+      for (const item of textItems) {
+        if (currentLine.length === 0) {
+          currentLine.push(item);
+        } else {
+          const lastItem = currentLine[currentLine.length - 1];
+          if (Math.abs(item.transform[5] - lastItem.transform[5]) <= 4) {
+            currentLine.push(item);
+          } else {
+            lines.push(currentLine);
+            currentLine = [item];
+          }
         }
-        const xA = a.transform[4];
-        const xB = b.transform[4];
-        return xA - xB;
-      });
+      }
+      if (currentLine.length > 0) {
+        lines.push(currentLine);
+      }
 
-      let currentParagraphItems: any[] = [];
-      let lastY: number | null = null;
-      let lastX: number | null = null;
-      let lastWidth: number | null = null;
-      let lineText = '';
+      // Sort items within each line from left to right (X ascending)
+      for (const line of lines) {
+        line.sort((a, b) => a.transform[4] - b.transform[4]);
+      }
 
-      const commitParagraph = () => {
-        if (lineText.trim() && currentParagraphItems.length > 0) {
-          // Calculate text boundary and average font size
-          const minX = Math.min(...currentParagraphItems.map((item) => item.transform[4]));
-          const maxX = Math.max(...currentParagraphItems.map((item) => item.transform[4] + (item.width || 0)));
-          const heights = currentParagraphItems.map((item) => Math.abs(item.transform[3]) || item.height || 10);
+      // Process lines into paragraph blocks
+      let pendingText = '';
+      let pendingItems: any[] = [];
+      let lastLineY: number | null = null;
+      let lastLineHeight = 10;
+
+      const commitPending = () => {
+        if (pendingText.trim() && pendingItems.length > 0) {
+          const minX = Math.min(...pendingItems.map((item) => item.transform[4]));
+          const maxX = Math.max(...pendingItems.map((item) => item.transform[4] + (item.width || 0)));
+          const heights = pendingItems.map((item) => Math.abs(item.transform[3]) || item.height || 10);
           const avgHeight = heights.reduce((sum, h) => sum + h, 0) / heights.length;
 
           // Alignment heuristic
@@ -521,58 +541,133 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             }
           }
 
+          // Check if list item
+          const trimmedText = pendingText.trim();
+          const isList = trimmedText.startsWith('•') || 
+                         trimmedText.startsWith('') || 
+                         trimmedText.startsWith('\uf0b7') || 
+                         trimmedText.startsWith('*') || 
+                         trimmedText.startsWith('-') || 
+                         /^\d+[\)\.]/.test(trimmedText);
+
           paragraphs.push({
-            text: lineText.trim(),
+            text: trimmedText,
             alignment,
-            fontSize: Math.round(avgHeight * 0.95), // scale down slightly for text line height
-            isHeading: avgHeight > 12.5
+            fontSize: Math.round(avgHeight * 0.95),
+            isHeading: avgHeight > 12.5 && !isList,
+            isList
           });
         }
-        lineText = '';
-        currentParagraphItems = [];
+        pendingText = '';
+        pendingItems = [];
       };
 
-      for (const item of textItems) {
-        const currentY = item.transform[5];
-        const currentX = item.transform[4];
-        const currentHeight = Math.abs(item.transform[3]) || item.height || 10;
-        const currentWidth = item.width || 0;
+      for (const line of lines) {
+        const currentLineY = line[0].transform[5];
+        const lineHeights = line.map((item) => Math.abs(item.transform[3]) || item.height || 10);
+        const avgLineHeight = lineHeights.reduce((sum, h) => sum + h, 0) / lineHeights.length;
 
-        if (lastY !== null && Math.abs(currentY - lastY) > 5) {
-          // New line detected
-          const dy = lastY - currentY;
-          if (dy > 18 || dy < -5) {
-            // Significant vertical gap (new paragraph)
-            commitParagraph();
-            lineText = item.str;
-          } else {
-            // Continuation line of the same paragraph
-            const needsSpace = lineText && !lineText.endsWith(' ') && !item.str.startsWith(' ');
-            lineText += (needsSpace ? ' ' : '') + item.str;
+        // Check for horizontal gaps (split column layout)
+        let splitIndex = -1;
+        for (let j = 0; j < line.length - 1; j++) {
+          const current = line[j];
+          const next = line[j + 1];
+          const currentRight = current.transform[4] + (current.width || 0);
+          const nextLeft = next.transform[4];
+          const gap = nextLeft - currentRight;
+
+          if (gap > pageWidth * 0.12) {
+            splitIndex = j;
+            break;
           }
-        } else {
-          // Same line: check horizontal gap to see if a space is needed
-          if (lastX !== null && lastWidth !== null) {
-            const gap = currentX - (lastX + lastWidth);
-            const spaceThreshold = currentHeight * 0.18; // space threshold roughly 18% of font size
-            
-            const endsWithSpace = lineText.endsWith(' ');
-            const startsWithSpace = item.str.startsWith(' ');
-            
-            if (!endsWithSpace && !startsWithSpace && gap > spaceThreshold) {
-              lineText += ' ';
-            }
-          }
-          lineText += item.str;
         }
 
-        currentParagraphItems.push(item);
-        lastY = currentY;
-        lastX = currentX;
-        lastWidth = currentWidth;
+        // Construct line texts
+        let lineLeftText = '';
+        let lineRightText = '';
+        let lineFullText = '';
+
+        const joinItems = (items: any[]) => {
+          let text = '';
+          let prevX: number | null = null;
+          let prevWidth: number | null = null;
+          for (const item of items) {
+            const currentX = item.transform[4];
+            const currentHeight = Math.abs(item.transform[3]) || item.height || 10;
+            if (prevX !== null && prevWidth !== null) {
+              const gap = currentX - (prevX + prevWidth);
+              const spaceThreshold = currentHeight * 0.28; // Prevents letter splitting in uppercase headers
+              if (!text.endsWith(' ') && !item.str.startsWith(' ') && gap > spaceThreshold) {
+                text += ' ';
+              }
+            }
+            text += item.str;
+            prevX = currentX;
+            prevWidth = item.width || 0;
+          }
+          return text;
+        };
+
+        if (splitIndex !== -1) {
+          // Commit any pending paragraph first before starting a table row
+          commitPending();
+
+          const leftItems = line.slice(0, splitIndex + 1);
+          const rightItems = line.slice(splitIndex + 1);
+
+          lineLeftText = joinItems(leftItems);
+          lineRightText = joinItems(rightItems);
+
+          paragraphs.push({
+            isDualColumn: true,
+            leftText: lineLeftText.trim(),
+            rightText: lineRightText.trim(),
+            alignment: 'left',
+            fontSize: Math.round(avgLineHeight * 0.95),
+            isHeading: avgLineHeight > 12.5
+          });
+
+          lastLineY = currentLineY;
+          lastLineHeight = avgLineHeight;
+        } else {
+          lineFullText = joinItems(line);
+
+          // Paragraph breaks check
+          let startNewParagraph = false;
+          if (lastLineY !== null) {
+            const dy = lastLineY - currentLineY;
+            const threshold = Math.max(14, lastLineHeight * 1.35);
+            
+            // Check if bullet point or list marker starts this line
+            const trimmedLineText = lineFullText.trim();
+            const startsWithListMarker = trimmedLineText.startsWith('•') || 
+                                         trimmedLineText.startsWith('') || 
+                                         trimmedLineText.startsWith('\uf0b7') || 
+                                         trimmedLineText.startsWith('*') || 
+                                         trimmedLineText.startsWith('-') || 
+                                         /^\d+[\)\.]/.test(trimmedLineText);
+
+            if (dy > threshold || dy < -5 || startsWithListMarker) {
+              startNewParagraph = true;
+            }
+          } else {
+            startNewParagraph = true;
+          }
+
+          if (startNewParagraph) {
+            commitPending();
+          }
+
+          const needsSpace = pendingText && !pendingText.endsWith(' ') && !lineFullText.startsWith(' ');
+          pendingText += (needsSpace ? ' ' : '') + lineFullText;
+          pendingItems.push(...line);
+
+          lastLineY = currentLineY;
+          lastLineHeight = avgLineHeight;
+        }
       }
 
-      commitParagraph();
+      commitPending();
     }
   } catch (err) {
     console.warn('PDF.js text extraction failed, falling back to basic info:', err);
@@ -601,14 +696,27 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
     <body>
       <div style="color: #111;">
         ${paragraphs.map((p) => {
+          if (p.isDualColumn) {
+            return `
+              <table width="100%" style="border-collapse: collapse; margin-bottom: 6pt; border: none;">
+                <tr style="border: none;">
+                  <td align="left" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">${escapeHtml(p.leftText || '')}</td>
+                  <td align="right" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">${escapeHtml(p.rightText || '')}</td>
+                </tr>
+              </table>
+            `;
+          }
+
           const style = [
             `text-align: ${p.alignment}`,
             `font-size: ${p.fontSize}pt`,
-            p.isHeading ? 'font-weight: bold' : 'font-weight: normal',
-            `margin-bottom: ${p.isHeading ? '14pt' : '10pt'}`,
-            `line-height: 1.4`
-          ].join('; ');
-          return `<p style="${style}">${escapeHtml(p.text)}</p>`;
+            p.isHeading ? 'font-weight: bold; border-bottom: 1.5px solid #333; padding-bottom: 2px' : 'font-weight: normal',
+            p.isList ? 'margin-left: 20pt; text-indent: -10pt' : '',
+            `margin-bottom: ${p.isHeading ? '12pt' : '6pt'}`,
+            `line-height: 1.35`
+          ].filter(Boolean).join('; ');
+          
+          return `<p style="${style}">${escapeHtml(p.text || '')}</p>`;
         }).join('\n')}
       </div>
     </body>
