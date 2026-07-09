@@ -452,6 +452,27 @@ interface ParagraphData {
   isHeading: boolean;
   isList?: boolean;
   isDualColumn?: boolean;
+  fontFamily?: string;
+}
+
+function getFontStack(fontFamily?: string): string {
+  if (!fontFamily) return 'Arial, Helvetica, sans-serif';
+  const name = fontFamily.toLowerCase();
+  
+  if (
+    name.includes('cambria') || 
+    name.includes('palatino') || 
+    name.includes('times') || 
+    name.includes('georgia') || 
+    name.includes('serif') ||
+    name.includes('garamond') ||
+    name.includes('bookman') ||
+    name.includes('roman')
+  ) {
+    return `"${fontFamily}", "Times New Roman", Georgia, serif`;
+  }
+  
+  return `"${fontFamily}", Arial, Helvetica, sans-serif`;
 }
 
 function linkify(text: string): string {
@@ -482,7 +503,30 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
+      const [textContent] = await Promise.all([
+        page.getTextContent(),
+        page.getOperatorList()
+      ]);
+
+      // Map subsetted font names from page resources
+      const fontNameMap = new Map<string, string>();
+      for (const item of textContent.items as any[]) {
+        if (item.fontName && !fontNameMap.has(item.fontName)) {
+          try {
+            const fontObj = page.commonObjs.get(item.fontName);
+            if (fontObj) {
+              const fontName = fontObj.name || fontObj.fallbackName;
+              if (fontName) {
+                const cleanName = fontName.includes('+') ? fontName.split('+')[1] : fontName;
+                fontNameMap.set(item.fontName, cleanName);
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+
       const viewport = page.getViewport({ scale: 1.0 });
       const pageWidth = viewport.width || 595.27; // Default A4 width in points
 
@@ -561,12 +605,27 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
                          trimmedText.startsWith('-') || 
                          /^\d+[\)\.]/.test(trimmedText);
 
+          // Find dominant font name in this paragraph
+          const fontNames = pendingItems
+            .map((item) => item.fontName ? fontNameMap.get(item.fontName) : null)
+            .filter(Boolean);
+          
+          let fontFamily = 'Arial';
+          if (fontNames.length > 0) {
+            const counts = fontNames.reduce((acc, name) => {
+              acc[name!] = (acc[name!] || 0) + 1;
+              return acc;
+            }, {} as Record<string, number>);
+            fontFamily = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+          }
+
           paragraphs.push({
             text: trimmedText,
             alignment,
-            fontSize: Math.round(avgHeight * 0.95),
+            fontSize: Math.round(avgHeight), // Use exact PDF font size
             isHeading: avgHeight > 11.0 && !isList,
-            isList
+            isList,
+            fontFamily
           });
         }
         pendingText = '';
@@ -578,6 +637,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         const lineHeights = line.map((item) => Math.abs(item.transform[3]) || item.height || 10);
         const avgLineHeight = lineHeights.reduce((sum, h) => sum + h, 0) / lineHeights.length;
         const currentLineMaxX = Math.max(...line.map((item) => item.transform[4] + (item.width || 0)));
+        const lineFontFamily = line[0].fontName ? fontNameMap.get(line[0].fontName) : 'Arial';
 
         // Check for horizontal gaps (split column layout)
         let splitIndex = -1;
@@ -643,8 +703,9 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             leftText: lineLeftText.trim(),
             rightText: lineRightText.trim(),
             alignment: 'left',
-            fontSize: Math.round(avgLineHeight * 0.95),
-            isHeading: avgLineHeight > 11.0
+            fontSize: Math.round(avgLineHeight), // Exact PDF font size
+            isHeading: avgLineHeight > 11.0,
+            fontFamily: lineFontFamily
           });
 
           lastLineY = currentLineY;
@@ -667,8 +728,9 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
               leftText: leftText,
               rightText: rightText,
               alignment: 'left',
-              fontSize: Math.round(avgLineHeight * 0.95),
-              isHeading: avgLineHeight > 11.0
+              fontSize: Math.round(avgLineHeight), // Exact PDF font size
+              isHeading: avgLineHeight > 11.0,
+              fontFamily: lineFontFamily
             });
 
             lastLineY = currentLineY;
@@ -754,7 +816,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           size: A4;
           margin: 1.2cm;
         }
-        body { font-family: Arial, sans-serif; line-height: 1.25; padding: 0; }
+        body { font-family: "Times New Roman", Georgia, serif; line-height: 1.25; padding: 0; }
         p { margin: 0 0 4pt 0; }
 
         /* Microsoft Word Specific Section Page setup */
@@ -768,11 +830,6 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         div.Section1 {
           page: Section1;
         }
-
-        /* Enforce global font family override */
-        body, p, td, span, h2, table, a, b, li {
-          font-family: Arial, Helvetica, sans-serif !important;
-        }
       </style>
     </head>
     <body>
@@ -781,16 +838,17 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           if (p.isDualColumn) {
             const leftContent = linkify(escapeHtml(p.leftText || ''));
             const rightContent = linkify(escapeHtml(p.rightText || ''));
+            const fontStack = getFontStack(p.fontFamily);
             return `
               <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 4pt; border: none;">
                 <tr style="border: none;">
                   <td align="left" valign="top" style="padding: 0; border: none; text-align: left;">
-                    <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
+                    <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; ${p.isHeading ? 'font-weight: bold;' : ''}">
                       ${p.isHeading ? `<b>${leftContent}</b>` : leftContent}
                     </span>
                   </td>
                   <td align="right" valign="top" style="padding: 0; border: none; text-align: right;">
-                    <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
+                    <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; ${p.isHeading ? 'font-weight: bold;' : ''}">
                       ${p.isHeading ? `<b>${rightContent}</b>` : rightContent}
                     </span>
                   </td>
@@ -801,8 +859,9 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
           if (p.isHeading) {
             const headingContent = linkify(escapeHtml(p.text || ''));
+            const fontStack = getFontStack(p.fontFamily);
             return `
-              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; color: #111; margin-top: 12pt; margin-bottom: 2pt; border: none; padding: 0; text-align: ${p.alignment};">
+              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; color: #111; margin-top: 12pt; margin-bottom: 2pt; border: none; padding: 0; text-align: ${p.alignment};">
                 <b>${headingContent}</b>
               </h2>
               <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 6pt; padding: 0;" />
@@ -812,6 +871,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           if (p.isList) {
             const cleanText = p.text ? p.text.replace(/^([•\uf0b7\*\-]|&bull;)\s*/, '') : '';
             const listContent = linkify(escapeHtml(cleanText));
+            const fontStack = getFontStack(p.fontFamily);
             const style = [
               `margin: 0 0 4pt 0`,
               `margin-left: 20pt`,
@@ -821,12 +881,13 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             ].join('; ');
             return `
               <p align="left" style="${style}">
-                <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif;">&bull;&nbsp;&nbsp;${listContent}</span>
+                <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack};">&bull;&nbsp;&nbsp;${listContent}</span>
               </p>
             `;
           }
 
           const paragraphContent = linkify(escapeHtml(p.text || ''));
+          const fontStack = getFontStack(p.fontFamily);
           const style = [
             `margin: 0 0 4pt 0`,
             `line-height: 1.35`,
@@ -835,7 +896,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           
           return `
             <p align="${p.alignment}" style="${style}">
-              <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif;">${paragraphContent}</span>
+              <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack};">${paragraphContent}</span>
             </p>
           `;
         }).join('\n')}
