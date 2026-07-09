@@ -642,7 +642,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           paragraphs.push({
             text: trimmedText,
             alignment,
-            fontSize: Math.round(avgHeight), // Use exact PDF font size
+            fontSize: Math.round(avgHeight * 0.85 * 2) / 2, // Scale PDF font size by 0.85 with half-point precision
             isHeading: avgHeight > 11.0 && !isList,
             isList,
             fontFamily
@@ -723,7 +723,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             leftText: lineLeftText.trim(),
             rightText: lineRightText.trim(),
             alignment: 'left',
-            fontSize: Math.round(avgLineHeight), // Exact PDF font size
+            fontSize: Math.round(avgLineHeight * 0.85 * 2) / 2, // Scale PDF font size by 0.85 with half-point precision
             isHeading: avgLineHeight > 11.0,
             fontFamily: lineFontFamily
           });
@@ -748,7 +748,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
               leftText: leftText,
               rightText: rightText,
               alignment: 'left',
-              fontSize: Math.round(avgLineHeight), // Exact PDF font size
+              fontSize: Math.round(avgLineHeight * 0.85 * 2) / 2, // Scale PDF font size by 0.85 with half-point precision
               isHeading: avgLineHeight > 11.0,
               fontFamily: lineFontFamily
             });
