@@ -454,6 +454,16 @@ interface ParagraphData {
   isDualColumn?: boolean;
 }
 
+function linkify(text: string): string {
+  const urlRegex = /(https?:\/\/[^\s\)]+)/g;
+  const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+
+  let html = text;
+  html = html.replace(urlRegex, '<a href="$1" style="color: #0563c1; text-decoration: underline;">$1</a>');
+  html = html.replace(emailRegex, '<a href="mailto:$1" style="color: #0563c1; text-decoration: underline;">$1</a>');
+  return html;
+}
+
 /**
  * Convert PDF to editable Word document (.doc)
  */
@@ -599,8 +609,16 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             if (prevX !== null && prevWidth !== null) {
               const gap = currentX - (prevX + prevWidth);
               const spaceThreshold = currentHeight * 0.28; // Prevents letter splitting in uppercase headers
+              
+              // Skip spaces around punctuation, URLs, and phone number dashes
+              const isSpecialChar = (char: string) => /[-.@/\\+:_~#?=%&\[\]()]/.test(char);
+              const prevChar = text.slice(-1);
+              const nextChar = item.str.charAt(0);
+              
               if (!text.endsWith(' ') && !item.str.startsWith(' ') && gap > spaceThreshold) {
-                text += ' ';
+                if (!isSpecialChar(prevChar) && !isSpecialChar(nextChar)) {
+                  text += ' ';
+                }
               }
             }
             text += item.str;
@@ -699,8 +717,12 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       <meta charset="utf-8">
       <title>${originalName}</title>
       <style>
-        body { font-family: Arial, sans-serif; line-height: 1.4; padding: 40px; }
-        p { margin: 0 0 10px 0; }
+        @page {
+          size: A4;
+          margin: 1.2cm;
+        }
+        body { font-family: Arial, sans-serif; line-height: 1.25; padding: 0; }
+        p { margin: 0 0 4pt 0; }
       </style>
     </head>
     <body>
@@ -708,13 +730,13 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         ${paragraphs.map((p) => {
           if (p.isDualColumn) {
             return `
-              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 6pt; border: none;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 4pt; border: none;">
                 <tr style="border: none;">
                   <td align="left" valign="top" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
-                    ${p.isHeading ? `<b>${escapeHtml(p.leftText || '')}</b>` : escapeHtml(p.leftText || '')}
+                    ${p.isHeading ? `<b>${linkify(escapeHtml(p.leftText || ''))}</b>` : linkify(escapeHtml(p.leftText || ''))}
                   </td>
                   <td align="right" valign="top" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
-                    ${p.isHeading ? `<b>${escapeHtml(p.rightText || '')}</b>` : escapeHtml(p.rightText || '')}
+                    ${p.isHeading ? `<b>${linkify(escapeHtml(p.rightText || ''))}</b>` : linkify(escapeHtml(p.rightText || ''))}
                   </td>
                 </tr>
               </table>
@@ -723,22 +745,34 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
           if (p.isHeading) {
             return `
-              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; color: #111; margin-top: 14pt; margin-bottom: 4pt; border: none; padding: 0;">
-                <b>${escapeHtml(p.text || '')}</b>
+              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; color: #111; margin-top: 12pt; margin-bottom: 2pt; border: none; padding: 0;">
+                <b>${linkify(escapeHtml(p.text || ''))}</b>
               </h2>
-              <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 8pt; padding: 0;" />
+              <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 6pt; padding: 0;" />
             `;
+          }
+
+          if (p.isList) {
+            const cleanText = p.text ? p.text.replace(/^([•\uf0b7\*\-]|&bull;)\s*/, '') : '';
+            const style = [
+              `font-size: ${p.fontSize}pt`,
+              `font-family: Arial, sans-serif`,
+              `margin-left: 20pt`,
+              `text-indent: -10pt`,
+              `margin-bottom: 4pt`,
+              `line-height: 1.35`
+            ].join('; ');
+            return `<p align="left" style="${style}">&bull; ${linkify(escapeHtml(cleanText))}</p>`;
           }
 
           const style = [
             `font-size: ${p.fontSize}pt`,
             `font-family: Arial, sans-serif`,
-            p.isList ? 'margin-left: 20pt; text-indent: -10pt' : '',
-            `margin-bottom: 6pt`,
+            `margin-bottom: 4pt`,
             `line-height: 1.35`
-          ].filter(Boolean).join('; ');
+          ].join('; ');
           
-          return `<p align="${p.alignment}" style="${style}">${escapeHtml(p.text || '')}</p>`;
+          return `<p align="${p.alignment}" style="${style}">${linkify(escapeHtml(p.text || ''))}</p>`;
         }).join('\n')}
       </div>
     </body>
