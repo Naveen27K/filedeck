@@ -454,6 +454,7 @@ interface ParagraphData {
   isDualColumn?: boolean;
   fontFamily?: string;
   isPageBreak?: boolean;
+  minX?: number;
 }
 
 function getFontStack(fontFamily?: string): string {
@@ -645,7 +646,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             fontSize: Math.round(avgHeight * 0.85 * 2) / 2, // Scale PDF font size by 0.85 with half-point precision
             isHeading: avgHeight > 11.0 && !isList,
             isList,
-            fontFamily
+            fontFamily,
+            minX
           });
         }
         pendingText = '';
@@ -718,6 +720,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           lineLeftText = joinItems(leftItems);
           lineRightText = joinItems(rightItems);
 
+          const leftMinX = Math.min(...leftItems.map((item) => item.transform[4]));
           paragraphs.push({
             isDualColumn: true,
             leftText: lineLeftText.trim(),
@@ -725,7 +728,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             alignment: 'left',
             fontSize: Math.round(avgLineHeight * 0.85 * 2) / 2, // Scale PDF font size by 0.85 with half-point precision
             isHeading: avgLineHeight > 11.0,
-            fontFamily: lineFontFamily
+            fontFamily: lineFontFamily,
+            minX: leftMinX
           });
 
           lastLineY = currentLineY;
@@ -743,6 +747,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const rightText = match[1];
             const leftText = lineFullText.substring(0, lineFullText.lastIndexOf(rightText)).trim();
 
+            const lineMinX = Math.min(...line.map((item) => item.transform[4]));
             paragraphs.push({
               isDualColumn: true,
               leftText: leftText,
@@ -750,7 +755,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
               alignment: 'left',
               fontSize: Math.round(avgLineHeight * 0.85 * 2) / 2, // Scale PDF font size by 0.85 with half-point precision
               isHeading: avgLineHeight > 11.0,
-              fontFamily: lineFontFamily
+              fontFamily: lineFontFamily,
+              minX: lineMinX
             });
 
             lastLineY = currentLineY;
@@ -878,6 +884,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             return '<br style="page-break-before: always; clear: both;" />';
           }
 
+          const indent = (p.alignment === 'left' && p.minX !== undefined) ? Math.max(0, Math.round(p.minX - marginL)) : 0;
+
           if (p.isDualColumn) {
             const leftContent = linkify(escapeHtml(p.leftText || ''));
             const rightContent = linkify(escapeHtml(p.rightText || ''));
@@ -885,7 +893,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             return `
               <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 1.5pt; border: none;">
                 <tr style="border: none;">
-                  <td align="left" valign="top" style="padding: 0; border: none; text-align: left;">
+                  <td align="left" valign="top" style="padding: 0; padding-left: ${indent}pt; border: none; text-align: left;">
                     <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; ${p.isHeading ? 'font-weight: bold;' : ''}">
                       ${p.isHeading ? `<b>${leftContent}</b>` : leftContent}
                     </span>
@@ -904,7 +912,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const headingContent = linkify(escapeHtml(p.text || ''));
             const fontStack = getFontStack(p.fontFamily);
             return `
-              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; color: #111; margin-top: 6pt; margin-bottom: 1.5pt; border: none; padding: 0; text-align: ${p.alignment};">
+              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; color: #111; margin-top: 6pt; margin-bottom: 1.5pt; border: none; padding: 0; text-align: ${p.alignment}; margin-left: ${indent}pt;">
                 <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack};"><b>${headingContent}</b></span>
               </h2>
               <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 3pt; padding: 0;" />
@@ -917,7 +925,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const fontStack = getFontStack(p.fontFamily);
             const style = [
               `margin: 0 0 1.5pt 0`,
-              `margin-left: 20pt`,
+              `margin-left: ${indent + 10}pt`,
               `text-indent: -10pt`,
               `line-height: 1.05`,
               `text-align: left`
@@ -933,6 +941,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           const fontStack = getFontStack(p.fontFamily);
           const style = [
             `margin: 0 0 1.5pt 0`,
+            `margin-left: ${indent}pt`,
             `line-height: 1.05`,
             `text-align: ${p.alignment}`
           ].join('; ');
