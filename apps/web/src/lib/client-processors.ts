@@ -496,6 +496,12 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
   const paragraphs: ParagraphData[] = [];
 
+  // Track coordinate boundaries of all pages to dynamically adjust margins
+  let docMinX = 595.27;
+  let docMaxX = 0;
+  let docMinY = 842.04;
+  let docMaxY = 0;
+
   try {
     const pdfjsLib = await loadPdfJs();
     const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes) });
@@ -533,6 +539,19 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       const textItems = (textContent.items as any[]).filter(
         (item) => item && typeof item.str === 'string' && Array.isArray(item.transform)
       );
+
+      // Track bounding coordinates
+      for (const item of textItems) {
+        const x = item.transform[4];
+        const y = item.transform[5];
+        const h = Math.abs(item.transform[3]) || item.height || 10;
+        const w = item.width || 0;
+
+        if (x < docMinX) docMinX = x;
+        if (x + w > docMaxX) docMaxX = x + w;
+        if (y < docMinY) docMinY = y;
+        if (y + h > docMaxY) docMaxY = y + h;
+      }
 
       // Sort items: primarily top-to-bottom (Y descending)
       textItems.sort((a, b) => b.transform[5] - a.transform[5]);
@@ -796,6 +815,16 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
     });
   }
 
+  // Dynamic page margins based on document bounding box
+  const pageW = 595.3;
+  const pageH = 841.9;
+  
+  // Constrain margins between 15pt and 72pt, adding a small safe buffer
+  const marginL = Math.max(15, Math.min(72, Math.floor(docMinX - 3)));
+  const marginR = Math.max(15, Math.min(72, Math.floor(pageW - docMaxX - 3)));
+  const marginT = Math.max(15, Math.min(72, Math.floor(pageH - docMaxY - 3)));
+  const marginB = Math.max(15, Math.min(72, Math.floor(docMinY - 3)));
+
   const wordHtml = `
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
     <head>
@@ -816,15 +845,15 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           size: A4;
           margin: 1.2cm;
         }
-        body { font-family: "Times New Roman", Georgia, serif; line-height: 1.25; padding: 0; }
-        p { margin: 0 0 4pt 0; }
+        body { font-family: "Times New Roman", Georgia, serif; line-height: 1.15; padding: 0; }
+        p { margin: 0 0 2.5pt 0; }
 
         /* Microsoft Word Specific Section Page setup */
         @page Section1 {
           size: 595.3pt 841.9pt; /* A4 size in points */
-          margin: 36.0pt 36.0pt 36.0pt 36.0pt; /* 0.5 in / 1.2cm margins in points */
-          mso-header-margin: 36.0pt;
-          mso-footer-margin: 36.0pt;
+          margin: ${marginT}.0pt ${marginR}.0pt ${marginB}.0pt ${marginL}.0pt;
+          mso-header-margin: ${marginT}.0pt;
+          mso-footer-margin: ${marginB}.0pt;
           mso-paper-source: 0;
         }
         div.Section1 {
@@ -840,7 +869,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const rightContent = linkify(escapeHtml(p.rightText || ''));
             const fontStack = getFontStack(p.fontFamily);
             return `
-              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 4pt; border: none;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 2.5pt; border: none;">
                 <tr style="border: none;">
                   <td align="left" valign="top" style="padding: 0; border: none; text-align: left;">
                     <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; ${p.isHeading ? 'font-weight: bold;' : ''}">
@@ -861,10 +890,10 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const headingContent = linkify(escapeHtml(p.text || ''));
             const fontStack = getFontStack(p.fontFamily);
             return `
-              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; color: #111; margin-top: 12pt; margin-bottom: 2pt; border: none; padding: 0; text-align: ${p.alignment};">
-                <b>${headingContent}</b>
+              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; color: #111; margin-top: 8pt; margin-bottom: 2.5pt; border: none; padding: 0; text-align: ${p.alignment};">
+                <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack};"><b>${headingContent}</b></span>
               </h2>
-              <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 6pt; padding: 0;" />
+              <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 4pt; padding: 0;" />
             `;
           }
 
@@ -873,10 +902,10 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const listContent = linkify(escapeHtml(cleanText));
             const fontStack = getFontStack(p.fontFamily);
             const style = [
-              `margin: 0 0 4pt 0`,
+              `margin: 0 0 2.5pt 0`,
               `margin-left: 20pt`,
               `text-indent: -10pt`,
-              `line-height: 1.35`,
+              `line-height: 1.15`,
               `text-align: left`
             ].join('; ');
             return `
@@ -889,8 +918,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           const paragraphContent = linkify(escapeHtml(p.text || ''));
           const fontStack = getFontStack(p.fontFamily);
           const style = [
-            `margin: 0 0 4pt 0`,
-            `line-height: 1.35`,
+            `margin: 0 0 2.5pt 0`,
+            `line-height: 1.15`,
             `text-align: ${p.alignment}`
           ].join('; ');
           
