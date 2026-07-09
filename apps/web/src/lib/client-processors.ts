@@ -483,7 +483,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       // Sort items: primarily top-to-bottom (Y descending)
       textItems.sort((a, b) => b.transform[5] - a.transform[5]);
 
-      // Group items into lines where vertical coordinate difference is small (<= 4 points)
+      // Group items into lines where Y difference relative to the line baseline (first item) is small (<= 6 points)
       const lines: any[][] = [];
       let currentLine: any[] = [];
 
@@ -491,8 +491,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         if (currentLine.length === 0) {
           currentLine.push(item);
         } else {
-          const lastItem = currentLine[currentLine.length - 1];
-          if (Math.abs(item.transform[5] - lastItem.transform[5]) <= 4) {
+          const firstItem = currentLine[0];
+          if (Math.abs(item.transform[5] - firstItem.transform[5]) <= 6) {
             currentLine.push(item);
           } else {
             lines.push(currentLine);
@@ -708,25 +708,37 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         ${paragraphs.map((p) => {
           if (p.isDualColumn) {
             return `
-              <table width="100%" style="border-collapse: collapse; margin-bottom: 6pt; border: none;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 6pt; border: none;">
                 <tr style="border: none;">
-                  <td align="left" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">${escapeHtml(p.leftText || '')}</td>
-                  <td align="right" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">${escapeHtml(p.rightText || '')}</td>
+                  <td align="left" valign="top" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
+                    ${p.isHeading ? `<b>${escapeHtml(p.leftText || '')}</b>` : escapeHtml(p.leftText || '')}
+                  </td>
+                  <td align="right" valign="top" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
+                    ${p.isHeading ? `<b>${escapeHtml(p.rightText || '')}</b>` : escapeHtml(p.rightText || '')}
+                  </td>
                 </tr>
               </table>
             `;
           }
 
+          if (p.isHeading) {
+            return `
+              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; color: #111; margin-top: 14pt; margin-bottom: 4pt; border: none; padding: 0;">
+                <b>${escapeHtml(p.text || '')}</b>
+              </h2>
+              <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 8pt; padding: 0;" />
+            `;
+          }
+
           const style = [
-            `text-align: ${p.alignment}`,
             `font-size: ${p.fontSize}pt`,
-            p.isHeading ? 'font-weight: bold; border-bottom: 1.5px solid #333; padding-bottom: 2px' : 'font-weight: normal',
+            `font-family: Arial, sans-serif`,
             p.isList ? 'margin-left: 20pt; text-indent: -10pt' : '',
-            `margin-bottom: ${p.isHeading ? '12pt' : '6pt'}`,
+            `margin-bottom: 6pt`,
             `line-height: 1.35`
           ].filter(Boolean).join('; ');
           
-          return `<p style="${style}">${escapeHtml(p.text || '')}</p>`;
+          return `<p align="${p.alignment}" style="${style}">${escapeHtml(p.text || '')}</p>`;
         }).join('\n')}
       </div>
     </body>
