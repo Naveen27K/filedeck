@@ -443,6 +443,13 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;');
 }
 
+interface ParagraphData {
+  text: string;
+  alignment: 'left' | 'center' | 'right';
+  fontSize: number;
+  isHeading: boolean;
+}
+
 /**
  * Convert PDF to editable Word document (.doc)
  */
@@ -452,7 +459,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
   const originalName = file.name.substring(0, file.name.lastIndexOf('.')) || 'document';
   const pageCount = pdfDoc.getPageCount();
 
-  const paragraphs: string[] = [];
+  const paragraphs: ParagraphData[] = [];
 
   try {
     const pdfjsLib = await loadPdfJs();
@@ -462,40 +469,110 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      const items = textContent.items as any[];
+      const viewport = page.getViewport({ scale: 1.0 });
+      const pageWidth = viewport.width || 595.27; // Default A4 width in points
+      
+      const textItems = (textContent.items as any[]).filter(
+        (item) => item && typeof item.str === 'string' && Array.isArray(item.transform)
+      );
 
-      // Sort items: top-to-bottom, then left-to-right
-      items.sort((a, b) => {
-        const yA = a.transform ? a.transform[5] : 0;
-        const yB = b.transform ? b.transform[5] : 0;
+      // Sort items: top-to-bottom (Y descending), then left-to-right (X ascending)
+      textItems.sort((a, b) => {
+        const yA = a.transform[5];
+        const yB = b.transform[5];
         if (Math.abs(yA - yB) > 5) {
           return yB - yA;
         }
-        const xA = a.transform ? a.transform[4] : 0;
-        const xB = b.transform ? b.transform[4] : 0;
+        const xA = a.transform[4];
+        const xB = b.transform[4];
         return xA - xB;
       });
 
+      let currentParagraphItems: any[] = [];
       let lastY: number | null = null;
+      let lastX: number | null = null;
+      let lastWidth: number | null = null;
       let lineText = '';
 
-      for (const item of items) {
-        const currentY = item.transform ? item.transform[5] : null;
+      const commitParagraph = () => {
+        if (lineText.trim() && currentParagraphItems.length > 0) {
+          // Calculate text boundary and average font size
+          const minX = Math.min(...currentParagraphItems.map((item) => item.transform[4]));
+          const maxX = Math.max(...currentParagraphItems.map((item) => item.transform[4] + (item.width || 0)));
+          const heights = currentParagraphItems.map((item) => Math.abs(item.transform[3]) || item.height || 10);
+          const avgHeight = heights.reduce((sum, h) => sum + h, 0) / heights.length;
+
+          // Alignment heuristic
+          let alignment: 'left' | 'center' | 'right' = 'left';
+          const paragraphWidth = maxX - minX;
+          if (paragraphWidth > 0 && pageWidth > 0) {
+            const paragraphCenter = (minX + maxX) / 2;
+            const pageCenter = pageWidth / 2;
+
+            if (pageWidth - maxX < 80 && minX > pageWidth * 0.5) {
+              alignment = 'right';
+            } else if (
+              Math.abs(paragraphCenter - pageCenter) < 25 &&
+              minX > 40 &&
+              pageWidth - maxX > 40 &&
+              paragraphWidth < pageWidth * 0.75
+            ) {
+              alignment = 'center';
+            }
+          }
+
+          paragraphs.push({
+            text: lineText.trim(),
+            alignment,
+            fontSize: Math.round(avgHeight * 0.95), // scale down slightly for text line height
+            isHeading: avgHeight > 12.5
+          });
+        }
+        lineText = '';
+        currentParagraphItems = [];
+      };
+
+      for (const item of textItems) {
+        const currentY = item.transform[5];
+        const currentX = item.transform[4];
+        const currentHeight = Math.abs(item.transform[3]) || item.height || 10;
+        const currentWidth = item.width || 0;
 
         if (lastY !== null && Math.abs(currentY - lastY) > 5) {
-          if (lineText.trim()) {
-            paragraphs.push(lineText.trim());
+          // New line detected
+          const dy = lastY - currentY;
+          if (dy > 18 || dy < -5) {
+            // Significant vertical gap (new paragraph)
+            commitParagraph();
+            lineText = item.str;
+          } else {
+            // Continuation line of the same paragraph
+            const needsSpace = lineText && !lineText.endsWith(' ') && !item.str.startsWith(' ');
+            lineText += (needsSpace ? ' ' : '') + item.str;
           }
-          lineText = item.str;
         } else {
-          lineText += (lineText ? ' ' : '') + item.str;
+          // Same line: check horizontal gap to see if a space is needed
+          if (lastX !== null && lastWidth !== null) {
+            const gap = currentX - (lastX + lastWidth);
+            const spaceThreshold = currentHeight * 0.18; // space threshold roughly 18% of font size
+            
+            const endsWithSpace = lineText.endsWith(' ');
+            const startsWithSpace = item.str.startsWith(' ');
+            
+            if (!endsWithSpace && !startsWithSpace && gap > spaceThreshold) {
+              lineText += ' ';
+            }
+          }
+          lineText += item.str;
         }
+
+        currentParagraphItems.push(item);
         lastY = currentY;
+        lastX = currentX;
+        lastWidth = currentWidth;
       }
 
-      if (lineText.trim()) {
-        paragraphs.push(lineText.trim());
-      }
+      commitParagraph();
     }
   } catch (err) {
     console.warn('PDF.js text extraction failed, falling back to basic info:', err);
@@ -503,7 +580,12 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
   // Fallback if no text extracted or PDF.js failed
   if (paragraphs.length === 0) {
-    paragraphs.push('[This document has been converted into an editable Microsoft Word format. You can now edit, format, and save this file in MS Word.]');
+    paragraphs.push({
+      text: '[This document has been converted into an editable Microsoft Word format. You can now edit, format, and save this file in MS Word.]',
+      alignment: 'left',
+      fontSize: 11,
+      isHeading: false
+    });
   }
 
   const wordHtml = `
@@ -512,17 +594,22 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       <meta charset="utf-8">
       <title>${originalName}</title>
       <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
-        h1 { color: #2b2b2b; border-bottom: 2px solid #6366f1; pb: 5px; }
-        p { margin-bottom: 12px; }
+        body { font-family: Arial, sans-serif; line-height: 1.4; padding: 40px; }
+        p { margin: 0 0 10px 0; }
       </style>
     </head>
     <body>
-      <h1>${originalName}</h1>
-      <p><em>Converted from PDF (${pageCount} pages) on ${new Date().toLocaleDateString()}</em></p>
-      <hr/>
-      <div style="font-size: 11pt; color: #333;">
-        ${paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('\n')}
+      <div style="color: #111;">
+        ${paragraphs.map((p) => {
+          const style = [
+            `text-align: ${p.alignment}`,
+            `font-size: ${p.fontSize}pt`,
+            p.isHeading ? 'font-weight: bold' : 'font-weight: normal',
+            `margin-bottom: ${p.isHeading ? '14pt' : '10pt'}`,
+            `line-height: 1.4`
+          ].join('; ');
+          return `<p style="${style}">${escapeHtml(p.text)}</p>`;
+        }).join('\n')}
       </div>
     </body>
     </html>
