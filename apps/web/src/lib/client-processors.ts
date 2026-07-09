@@ -453,6 +453,7 @@ interface ParagraphData {
   isList?: boolean;
   isDualColumn?: boolean;
   fontFamily?: string;
+  isPageBreak?: boolean;
 }
 
 function getFontStack(fontFamily?: string): string {
@@ -800,6 +801,15 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       }
 
       commitPending();
+
+      if (i < pdf.numPages) {
+        paragraphs.push({
+          alignment: 'left',
+          fontSize: 1,
+          isHeading: false,
+          isPageBreak: true
+        });
+      }
     }
   } catch (err) {
     console.warn('PDF.js text extraction failed, falling back to basic info:', err);
@@ -845,8 +855,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           size: A4;
           margin: 1.2cm;
         }
-        body { font-family: "Times New Roman", Georgia, serif; line-height: 1.15; padding: 0; }
-        p { margin: 0 0 2.5pt 0; }
+        body { font-family: "Times New Roman", Georgia, serif; line-height: 1.05; padding: 0; }
+        p { margin: 0 0 1.5pt 0; }
 
         /* Microsoft Word Specific Section Page setup */
         @page Section1 {
@@ -864,12 +874,16 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
     <body>
       <div class="Section1" style="color: #111;">
         ${paragraphs.map((p) => {
+          if (p.isPageBreak) {
+            return '<br style="page-break-before: always; clear: both;" />';
+          }
+
           if (p.isDualColumn) {
             const leftContent = linkify(escapeHtml(p.leftText || ''));
             const rightContent = linkify(escapeHtml(p.rightText || ''));
             const fontStack = getFontStack(p.fontFamily);
             return `
-              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 2.5pt; border: none;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 1.5pt; border: none;">
                 <tr style="border: none;">
                   <td align="left" valign="top" style="padding: 0; border: none; text-align: left;">
                     <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; ${p.isHeading ? 'font-weight: bold;' : ''}">
@@ -890,10 +904,10 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const headingContent = linkify(escapeHtml(p.text || ''));
             const fontStack = getFontStack(p.fontFamily);
             return `
-              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; color: #111; margin-top: 8pt; margin-bottom: 2.5pt; border: none; padding: 0; text-align: ${p.alignment};">
+              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: ${fontStack}; color: #111; margin-top: 6pt; margin-bottom: 1.5pt; border: none; padding: 0; text-align: ${p.alignment};">
                 <span style="font-size: ${p.fontSize}pt; font-family: ${fontStack};"><b>${headingContent}</b></span>
               </h2>
-              <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 4pt; padding: 0;" />
+              <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 3pt; padding: 0;" />
             `;
           }
 
@@ -902,10 +916,10 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             const listContent = linkify(escapeHtml(cleanText));
             const fontStack = getFontStack(p.fontFamily);
             const style = [
-              `margin: 0 0 2.5pt 0`,
+              `margin: 0 0 1.5pt 0`,
               `margin-left: 20pt`,
               `text-indent: -10pt`,
-              `line-height: 1.15`,
+              `line-height: 1.05`,
               `text-align: left`
             ].join('; ');
             return `
@@ -918,8 +932,8 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           const paragraphContent = linkify(escapeHtml(p.text || ''));
           const fontStack = getFontStack(p.fontFamily);
           const style = [
-            `margin: 0 0 2.5pt 0`,
-            `line-height: 1.15`,
+            `margin: 0 0 1.5pt 0`,
+            `line-height: 1.05`,
             `text-align: ${p.alignment}`
           ].join('; ');
           
