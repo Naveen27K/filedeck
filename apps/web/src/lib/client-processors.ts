@@ -543,10 +543,10 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
             if (pageWidth - maxX < 80 && minX > pageWidth * 0.5) {
               alignment = 'right';
             } else if (
-              Math.abs(paragraphCenter - pageCenter) < 25 &&
-              minX > 40 &&
-              pageWidth - maxX > 40 &&
-              paragraphWidth < pageWidth * 0.75
+              Math.abs(paragraphCenter - pageCenter) < 50 &&
+              minX > 15 &&
+              pageWidth - maxX > 15 &&
+              paragraphWidth < pageWidth * 0.85
             ) {
               alignment = 'center';
             }
@@ -653,45 +653,68 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         } else {
           lineFullText = joinItems(line);
 
-          // Paragraph breaks check
-          let startNewParagraph = false;
-          if (lastLineY !== null) {
-            const dy = lastLineY - currentLineY;
-            const threshold = lastLineHeight * 1.35;
-            
-            // Check if previous line ended early (did not wrap to the right margin)
-            const prevLineEndedEarly = lastLineMaxX !== null && lastLineMaxX < pageWidth - 100;
+          // Split dates if there is a date range at the end of the line
+          const dateRangeRegex = /\b((?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?\d{4}\s*[-–]\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?\d{4}|Present))|(?:\d{4}\s*[-–]\s*(?:\d{4}|Present)))\s*$/i;
+          const match = lineFullText.match(dateRangeRegex);
 
-            // Check if bullet point or list marker starts this line
-            const trimmedLineText = lineFullText.trim();
-            const startsWithListMarker = trimmedLineText.startsWith('•') || 
-                                         trimmedLineText.startsWith('') || 
-                                         trimmedLineText.startsWith('\uf0b7') || 
-                                         trimmedLineText.startsWith('*') || 
-                                         trimmedLineText.startsWith('-') || 
-                                         /^\d+[\)\.]/.test(trimmedLineText);
+          if (match) {
+            commitPending();
+            const rightText = match[1];
+            const leftText = lineFullText.substring(0, lineFullText.lastIndexOf(rightText)).trim();
 
-            // Check if font size changed significantly
-            const fontSizeChanged = Math.abs(avgLineHeight - lastLineHeight) > 1.5;
+            paragraphs.push({
+              isDualColumn: true,
+              leftText: leftText,
+              rightText: rightText,
+              alignment: 'left',
+              fontSize: Math.round(avgLineHeight * 0.95),
+              isHeading: avgLineHeight > 12.5
+            });
 
-            if (dy > threshold || dy < -5 || prevLineEndedEarly || startsWithListMarker || fontSizeChanged) {
+            lastLineY = currentLineY;
+            lastLineHeight = avgLineHeight;
+            lastLineMaxX = null; // Do not merge into/from dual-column rows
+          } else {
+            // Paragraph breaks check
+            let startNewParagraph = false;
+            if (lastLineY !== null) {
+              const dy = lastLineY - currentLineY;
+              const threshold = lastLineHeight * 1.35;
+              
+              // Check if previous line ended early (did not wrap to the right margin)
+              const prevLineEndedEarly = lastLineMaxX !== null && lastLineMaxX < pageWidth - 100;
+
+              // Check if bullet point or list marker starts this line
+              const trimmedLineText = lineFullText.trim();
+              const startsWithListMarker = trimmedLineText.startsWith('•') || 
+                                           trimmedLineText.startsWith('') || 
+                                           trimmedLineText.startsWith('\uf0b7') || 
+                                           trimmedLineText.startsWith('*') || 
+                                           trimmedLineText.startsWith('-') || 
+                                           /^\d+[\)\.]/.test(trimmedLineText);
+
+              // Check if font size changed significantly
+              const fontSizeChanged = Math.abs(avgLineHeight - lastLineHeight) > 1.5;
+
+              if (dy > threshold || dy < -5 || prevLineEndedEarly || startsWithListMarker || fontSizeChanged) {
+                startNewParagraph = true;
+              }
+            } else {
               startNewParagraph = true;
             }
-          } else {
-            startNewParagraph = true;
+
+            if (startNewParagraph) {
+              commitPending();
+            }
+
+            const needsSpace = pendingText && !pendingText.endsWith(' ') && !lineFullText.startsWith(' ');
+            pendingText += (needsSpace ? ' ' : '') + lineFullText;
+            pendingItems.push(...line);
+
+            lastLineY = currentLineY;
+            lastLineHeight = avgLineHeight;
+            lastLineMaxX = currentLineMaxX;
           }
-
-          if (startNewParagraph) {
-            commitPending();
-          }
-
-          const needsSpace = pendingText && !pendingText.endsWith(' ') && !lineFullText.startsWith(' ');
-          pendingText += (needsSpace ? ' ' : '') + lineFullText;
-          pendingItems.push(...line);
-
-          lastLineY = currentLineY;
-          lastLineHeight = avgLineHeight;
-          lastLineMaxX = currentLineMaxX;
         }
       }
 
@@ -715,7 +738,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
     <head>
       <meta charset="utf-8">
-      <title>${originalName}</title>
+      <title></title>
       <!--[if gte mso 9]>
       <xml>
         <w:WordDocument>
