@@ -126,7 +126,11 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
   const handleFilesSelected = (selectedFiles: File[]) => {
     if (selectedFiles.length > 0) {
       setFiles(selectedFiles);
-      setStep('options');
+      if (tool && !tool.multiple && tool.fields.length === 0) {
+        handleProcess(selectedFiles);
+      } else {
+        setStep('options');
+      }
     } else {
       setFiles([]);
       setStep('upload');
@@ -138,8 +142,9 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
   };
 
   // Run file processing
-  const handleProcess = async () => {
-    if (files.length === 0 && !tool?.customLayout) return;
+  const handleProcess = async (overrideFiles?: File[]) => {
+    const activeFiles = overrideFiles || files;
+    if (activeFiles.length === 0 && !tool?.customLayout) return;
 
     setStep('processing');
     setProgress(10);
@@ -153,70 +158,70 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
 
       // Map processing trigger
       if (tool?.id === 'merge') {
-        const res = await processPdfMerge(files);
+        const res = await processPdfMerge(activeFiles);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'split') {
-        const res = await processPdfSplit(files[0], options.pages);
+        const res = await processPdfSplit(activeFiles[0], options.pages);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'rotate') {
-        const res = await processPdfRotate(files[0], options.angle);
+        const res = await processPdfRotate(activeFiles[0], options.angle);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'protect') {
-        const res = await processPdfProtect(files[0], options.password);
+        const res = await processPdfProtect(activeFiles[0], options.password);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'watermark') {
-        const res = await processPdfWatermark(files[0], options.text, options.fontSize, options.opacity);
+        const res = await processPdfWatermark(activeFiles[0], options.text, options.fontSize, options.opacity);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'resize') {
-        const res = await processImageResize(files[0], options.width, options.height, options.maintainAspectRatio);
+        const res = await processImageResize(activeFiles[0], options.width, options.height, options.maintainAspectRatio);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'compress' || tool?.id === 'image-data-compresser') {
-        const res = await processImageCompress(files[0], options.quality);
+        const res = await processImageCompress(activeFiles[0], options.quality);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'image-to-pdf') {
-        const res = await processImageToPdf(files);
+        const res = await processImageToPdf(activeFiles);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'pdf-to-word') {
-        const res = await processPdfToWord(files[0]);
+        const res = await processPdfToWord(activeFiles[0]);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'image-size-compressor') {
-        const res = await processImageSizeCompressor(files[0], options.targetSizeKB);
+        const res = await processImageSizeCompressor(activeFiles[0], options.targetSizeKB);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'convert') {
-        const res = await processImageConvert(files[0], options.format);
+        const res = await processImageConvert(activeFiles[0], options.format);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'rotate-image') {
-        const res = await processImageRotate(files[0], options.angle);
+        const res = await processImageRotate(activeFiles[0], options.angle);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'audio-convert') {
-        const res = await processAudioConvert(files[0], options.format);
+        const res = await processAudioConvert(activeFiles[0], options.format);
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.id === 'video-trim') {
         const start = Number(options.start || 0);
         const end = Number(options.end || 10);
-        const res = await processVideoTrim(files[0], start, end, (p) => {
+        const res = await processVideoTrim(activeFiles[0], start, end, (p) => {
           setProgress(Math.floor(40 + p * 0.5)); // Map 0-100% video trim to 40-90% overall progress
         });
         outputBlob = res.blob;
         outputName = res.name;
       } else if (tool?.category === 'video' || tool?.category === 'audio') {
-        const fileBytes = await files[0].arrayBuffer();
-        outputBlob = new Blob([fileBytes], { type: files[0].type || 'video/mp4' });
-        const orig = files[0].name.substring(0, files[0].name.lastIndexOf('.')) || 'media';
-        outputName = `${orig}_trimmed.${files[0].name.split('.').pop() || 'mp4'}`;
+        const fileBytes = await activeFiles[0].arrayBuffer();
+        outputBlob = new Blob([fileBytes], { type: activeFiles[0].type || 'video/mp4' });
+        const orig = activeFiles[0].name.substring(0, activeFiles[0].name.lastIndexOf('.')) || 'media';
+        outputName = `${orig}_trimmed.${activeFiles[0].name.split('.').pop() || 'mp4'}`;
       }
 
       setProgress(80);
@@ -230,6 +235,15 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
           previewUrl: (outputBlob.type.startsWith('image/') || outputBlob.type === 'application/pdf') ? downloadUrl : undefined
         });
         setProgress(100);
+
+        // Auto-trigger download (iLovePDF style)
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = outputName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
         setTimeout(() => setStep('result'), 300);
       } else {
         throw new Error('Processing failed to yield output file.');
@@ -473,7 +487,7 @@ export default function ToolPage({ params: paramsPromise }: ToolPageProps) {
                   Cancel
                 </button>
                 <button
-                  onClick={handleProcess}
+                  onClick={() => handleProcess()}
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3.5 text-sm font-semibold text-white hover:bg-violet-500 transition-all shadow-lg shadow-violet-600/30"
                 >
                   <Play className="h-4 w-4" />
