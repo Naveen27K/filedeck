@@ -716,27 +716,55 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
     <head>
       <meta charset="utf-8">
       <title>${originalName}</title>
+      <!--[if gte mso 9]>
+      <xml>
+        <w:WordDocument>
+          <w:View>Print</w:View>
+          <w:Zoom>100</w:Zoom>
+          <w:DoNotOptimizeForBrowser/>
+        </w:WordDocument>
+      </xml>
+      <![endif]-->
       <style>
+        /* Standard browser/viewer fallback */
         @page {
           size: A4;
           margin: 1.2cm;
         }
         body { font-family: Arial, sans-serif; line-height: 1.25; padding: 0; }
         p { margin: 0 0 4pt 0; }
+
+        /* Microsoft Word Specific Section Page setup */
+        @page Section1 {
+          size: 595.3pt 841.9pt; /* A4 size in points */
+          margin: 36.0pt 36.0pt 36.0pt 36.0pt; /* 0.5 in / 1.2cm margins in points */
+          mso-header-margin: 36.0pt;
+          mso-footer-margin: 36.0pt;
+          mso-paper-source: 0;
+        }
+        div.Section1 {
+          page: Section1;
+        }
       </style>
     </head>
     <body>
-      <div style="color: #111;">
+      <div class="Section1" style="color: #111;">
         ${paragraphs.map((p) => {
           if (p.isDualColumn) {
+            const leftContent = linkify(escapeHtml(p.leftText || ''));
+            const rightContent = linkify(escapeHtml(p.rightText || ''));
             return `
               <table width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-bottom: 4pt; border: none;">
                 <tr style="border: none;">
-                  <td align="left" valign="top" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
-                    ${p.isHeading ? `<b>${linkify(escapeHtml(p.leftText || ''))}</b>` : linkify(escapeHtml(p.leftText || ''))}
+                  <td align="left" valign="top" style="padding: 0; border: none;">
+                    <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
+                      ${p.isHeading ? `<b>${leftContent}</b>` : leftContent}
+                    </span>
                   </td>
-                  <td align="right" valign="top" style="padding: 0; border: none; font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
-                    ${p.isHeading ? `<b>${linkify(escapeHtml(p.rightText || ''))}</b>` : linkify(escapeHtml(p.rightText || ''))}
+                  <td align="right" valign="top" style="padding: 0; border: none;">
+                    <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; ${p.isHeading ? 'font-weight: bold;' : ''}">
+                      ${p.isHeading ? `<b>${rightContent}</b>` : rightContent}
+                    </span>
                   </td>
                 </tr>
               </table>
@@ -744,9 +772,10 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           }
 
           if (p.isHeading) {
+            const headingContent = linkify(escapeHtml(p.text || ''));
             return `
-              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; color: #111; margin-top: 12pt; margin-bottom: 2pt; border: none; padding: 0;">
-                <b>${linkify(escapeHtml(p.text || ''))}</b>
+              <h2 align="${p.alignment}" style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif; color: #111; margin-top: 12pt; margin-bottom: 2pt; border: none; padding: 0; text-align: ${p.alignment};">
+                <b>${headingContent}</b>
               </h2>
               <hr color="#333" size="1" style="height: 1.5px; border: none; color: #333; background-color: #333; margin-top: 0; margin-bottom: 6pt; padding: 0;" />
             `;
@@ -754,25 +783,33 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
           if (p.isList) {
             const cleanText = p.text ? p.text.replace(/^([•\uf0b7\*\-]|&bull;)\s*/, '') : '';
+            const listContent = linkify(escapeHtml(cleanText));
             const style = [
-              `font-size: ${p.fontSize}pt`,
-              `font-family: Arial, sans-serif`,
+              `margin: 0 0 4pt 0`,
               `margin-left: 20pt`,
               `text-indent: -10pt`,
-              `margin-bottom: 4pt`,
-              `line-height: 1.35`
+              `line-height: 1.35`,
+              `text-align: left`
             ].join('; ');
-            return `<p align="left" style="${style}">&bull; ${linkify(escapeHtml(cleanText))}</p>`;
+            return `
+              <p align="left" style="${style}">
+                <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif;">&bull;&nbsp;&nbsp;${listContent}</span>
+              </p>
+            `;
           }
 
+          const paragraphContent = linkify(escapeHtml(p.text || ''));
           const style = [
-            `font-size: ${p.fontSize}pt`,
-            `font-family: Arial, sans-serif`,
-            `margin-bottom: 4pt`,
-            `line-height: 1.35`
+            `margin: 0 0 4pt 0`,
+            `line-height: 1.35`,
+            `text-align: ${p.alignment}`
           ].join('; ');
           
-          return `<p align="${p.alignment}" style="${style}">${linkify(escapeHtml(p.text || ''))}</p>`;
+          return `
+            <p align="${p.alignment}" style="${style}">
+              <span style="font-size: ${p.fontSize}pt; font-family: Arial, sans-serif;">${paragraphContent}</span>
+            </p>
+          `;
         }).join('\n')}
       </div>
     </body>
