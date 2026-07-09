@@ -514,6 +514,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
       let pendingItems: any[] = [];
       let lastLineY: number | null = null;
       let lastLineHeight = 10;
+      let lastLineMaxX: number | null = null;
 
       const commitPending = () => {
         if (pendingText.trim() && pendingItems.length > 0) {
@@ -566,6 +567,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
         const currentLineY = line[0].transform[5];
         const lineHeights = line.map((item) => Math.abs(item.transform[3]) || item.height || 10);
         const avgLineHeight = lineHeights.reduce((sum, h) => sum + h, 0) / lineHeights.length;
+        const currentLineMaxX = Math.max(...line.map((item) => item.transform[4] + (item.width || 0)));
 
         // Check for horizontal gaps (split column layout)
         let splitIndex = -1;
@@ -576,7 +578,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           const nextLeft = next.transform[4];
           const gap = nextLeft - currentRight;
 
-          if (gap > pageWidth * 0.12) {
+          if (gap > pageWidth * 0.10) { // Optimized to 10% of page width
             splitIndex = j;
             break;
           }
@@ -629,6 +631,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
           lastLineY = currentLineY;
           lastLineHeight = avgLineHeight;
+          lastLineMaxX = null; // Do not merge into/from dual-column rows
         } else {
           lineFullText = joinItems(line);
 
@@ -636,8 +639,11 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
           let startNewParagraph = false;
           if (lastLineY !== null) {
             const dy = lastLineY - currentLineY;
-            const threshold = Math.max(14, lastLineHeight * 1.35);
+            const threshold = lastLineHeight * 1.35;
             
+            // Check if previous line ended early (did not wrap to the right margin)
+            const prevLineEndedEarly = lastLineMaxX !== null && lastLineMaxX < pageWidth - 100;
+
             // Check if bullet point or list marker starts this line
             const trimmedLineText = lineFullText.trim();
             const startsWithListMarker = trimmedLineText.startsWith('•') || 
@@ -647,7 +653,10 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
                                          trimmedLineText.startsWith('-') || 
                                          /^\d+[\)\.]/.test(trimmedLineText);
 
-            if (dy > threshold || dy < -5 || startsWithListMarker) {
+            // Check if font size changed significantly
+            const fontSizeChanged = Math.abs(avgLineHeight - lastLineHeight) > 1.5;
+
+            if (dy > threshold || dy < -5 || prevLineEndedEarly || startsWithListMarker || fontSizeChanged) {
               startNewParagraph = true;
             }
           } else {
@@ -664,6 +673,7 @@ export async function processPdfToWord(file: File): Promise<{ blob: Blob; name: 
 
           lastLineY = currentLineY;
           lastLineHeight = avgLineHeight;
+          lastLineMaxX = currentLineMaxX;
         }
       }
 
